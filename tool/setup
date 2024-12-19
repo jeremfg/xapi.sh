@@ -1,0 +1,123 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+#
+# This scripts sets up the environemnt for developpers. Just execute it.
+
+# Make sure we are being executed
+if [[ -p /dev/stdin ]] && [[ -z ${BASH_SOURCE[0]} ]]; then
+  # This script was piped
+  echo "ERROR: This script cannot be piped"
+  exit 1
+elif [[ ${BASH_SOURCE[0]} != "${0}" ]]; then
+  echo "ERROR: This script cannot be sourced"
+  exit 1
+fi
+
+# Get root directory of the project
+# https://stackoverflow.com/a/246128
+SL_SOURCE=${BASH_SOURCE[0]}
+while [[ -L "${SL_SOURCE}" ]]; do # resolve $SL_SOURCE until the file is no longer a symlink
+  SL_ROOT=$(cd -P "$(dirname "${SL_SOURCE}")" >/dev/null 2>&1 && pwd)
+  SL_SOURCE=$(readlink "${SL_SOURCE}")
+  [[ ${SL_SOURCE} != /* ]] && SL_SOURCE=${SL_ROOT}/${SL_SOURCE} # if $SL_SOURCE was a relative symlink, we need to resolve it relative to the path where the symlink file was located
+done
+SL_ROOT=$(cd -P "$(dirname "${SL_SOURCE}")" >/dev/null 2>&1 && pwd)
+SL_ROOT=$(realpath "${SL_ROOT}/..")
+
+# Sanity check
+if [[ ! -f "${SL_ROOT}/tool/$(basename "${BASH_SOURCE[0]}")" ]]; then
+  echo "Could not identify this project's ROOT"
+  echo "Expected: ${SL_ROOT}/tool/$(basename "${BASH_SOURCE[0]}")"
+  exit 1
+fi
+
+# Install git
+if ! command -v git &>/dev/null; then
+  echo "Installing git..."
+  if ! sudo apt-get -y install git; then
+    echo "Failed to install git"
+    exit 1
+  fi
+  echo "Git installed successfully"
+fi
+
+# Install python3
+if ! command -v python3 &>/dev/null; then
+  echo "Installing python3..."
+  if ! sudo apt-get -y install python3; then
+    echo "Failed to install python3"
+    exit 1
+  fi
+  echo "Python3 installed successfully"
+fi
+
+# Install pipx
+if ! command -v pipx &>/dev/null; then
+  echo "Installing pipx..."
+  if ! sudo apt-get -y install pipx; then
+    echo "Failed to install pipx"
+    exit 1
+  fi
+  if ! pipx ensurepath; then
+    echo "Failed to add pipx to PATH"
+    exit 1
+  fi
+  echo "Pipx installed successfully"
+fi
+
+# Install pre-commit
+if ! command -v pre-commit &>/dev/null; then
+  echo "Installing pre-commit..."
+  if ! pipx install pre-commit; then
+    echo "Failed to install pre-commit"
+    exit 1
+  fi
+  echo "Pre-commit installed successfully"
+fi
+
+# Check if pre-commit is already installed
+if [[ ! -f "${SL_ROOT}/.git/hooks/pre-commit" ]]; then
+  echo "Configuring pre-commit..."
+  pushd "${SL_ROOT}" &>/dev/null || exit 1
+  if ! pre-commit install; then
+    echo "Failed to configure pre-commit"
+    exit 1
+  fi
+  popd &>/dev/null || exit 1
+fi
+
+# Install shellcheck
+if ! command -v shellcheck &>/dev/null; then
+  echo "Installing shellcheck..."
+  if ! sudo apt-get -y install shellcheck; then
+    echo "Failed to install shellcheck"
+    exit 1
+  fi
+  echo "Shellcheck installed successfully"
+fi
+
+# Install bpkg
+if ! command -v bpkg &>/dev/null; then
+  echo "Installing bpkg..."
+  if ! file=$(curl -sLo- https://get.bpkg.sh); then
+    echo "Failed to download bpkg"
+    exit 1
+  fi
+  if ! echo "${file}" | bash; then
+    echo "Failed to install bpkg"
+    exit 1
+  fi
+  echo "Bpkg installed successfully"
+fi
+
+# Install semver.sh
+if ! command -v semver &>/dev/null; then
+  echo "Installing semver..."
+  if ! bpkg install jeremfg/semver.sh; then
+    echo "Failed to install semver"
+    exit 1
+  fi
+  echo "Semver installed successfully"
+fi
+
+echo "Dev environment setup successfully"
