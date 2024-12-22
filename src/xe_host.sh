@@ -26,7 +26,7 @@ xe_current_host() {
   fi
 
   local res
-  if ! res=$(xe "${XE_LOGIN}" host-list name-label="$(hostname || true)" --minimal); then
+  if ! res=$(xe ${XE_LOGIN} host-list name-label="$(hostname || true)" --minimal); then
     logError "Failed to get host"
     return 1
   elif [[ -z "${res}" ]]; then
@@ -59,7 +59,7 @@ xe_current_pool() {
   fi
 
   local res
-  if ! res=$(xe "${XE_LOGIN}" pool-list --minimal); then
+  if ! res=$(xe ${XE_LOGIN} pool-list --minimal); then
     logError "Failed to get pool"
     return 1
   elif [[ -z "${res}" ]]; then
@@ -96,7 +96,7 @@ xe_is_pool_masater() {
     return 1
   fi
 
-  if ! res=$(xe "${XE_LOGIN}" pool-param-get uuid="${cur_pool}" param-name=master --minimal); then
+  if ! res=$(xe ${XE_LOGIN} pool-param-get uuid="${cur_pool}" param-name=master --minimal); then
     logError "Failed to get pool master"
     return 1
   elif [[ -z "${res}" ]]; then
@@ -150,14 +150,14 @@ xe_configure_email() {
   fi
 
   local res
-  if ! res=$(xe "${XE_LOGIN}" pool-param-set uuid="${cur_pool}" other-config:mail-destination="${SYSADMIN}"); then
+  if ! res=$(xe ${XE_LOGIN} pool-param-set uuid="${cur_pool}" other-config:mail-destination="${SYSADMIN}"); then
     logError "Failed to set email destination"
     return 1
   else
     logInfo "XCP-ng's smail destination set to ${SYSADMIN}"
   fi
 
-  if ! res=$(xe "${XE_LOGIN}" pool-param-set uuid="${cur_pool}" other-config:ssmtp-mailhub="${SMTP}"); then
+  if ! res=$(xe ${XE_LOGIN} pool-param-set uuid="${cur_pool}" other-config:ssmtp-mailhub="${SMTP}"); then
     logError "Failed to set SMTP server"
     return 1
   else

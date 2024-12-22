@@ -26,7 +26,7 @@ xe_validate_nic() {
   fi
 
   # Force a rescan of interfaces
-  if ! xe "${XE_LOGIN}" pif-scan host-uuid="${HOST_ID}"; then
+  if ! xe ${XE_LOGIN} pif-scan host-uuid="${HOST_ID}"; then
     logError "Failed to scan for PIFs"
     return 1
   fi
@@ -57,7 +57,7 @@ xe_identify_nic() {
   local _mac="$1"
 
   local res
-  if ! res=$(xe "${XE_LOGIN}" pif-list MAC="${_mac}"); then
+  if ! res=$(xe ${XE_LOGIN} pif-list MAC="${_mac}"); then
     logError "Failed to execute search"
     return 1
   elif [[ -z "${res}" ]]; then
