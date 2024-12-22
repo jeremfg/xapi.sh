@@ -6,7 +6,7 @@
 if [[ -z ${GUARD_XE_NETWORK_SH} ]]; then
   GUARD_XE_NETWORK_SH=1
 else
-  return
+  return 0
 fi
 
 # Checks if the provided NICs exists
@@ -90,9 +90,9 @@ XN_ROOT=$(cd -P "$(dirname "${XN_SOURCE}")" >/dev/null 2>&1 && pwd)
 XN_ROOT=$(realpath "${XN_ROOT}/..")
 
 # Import dependencies
-GLOBAL_BPGK_LIB_DIR="${HOME}/.local/lib"
+GLOBAL_BPGK_LIB_DIR="${PREFIX:-/usr/local}/lib"
 # shellcheck disable=SC1091 # Ignore non-constant source
-if ! source "${GLOBAL_BPGK_LIB_DIR}/src/slf4.sh"; then
+if ! source "${GLOBAL_BPGK_LIB_DIR}/slf4.sh"; then
   echo "ERROR: Failed to load slf4.sh"
   exit 1
 fi
