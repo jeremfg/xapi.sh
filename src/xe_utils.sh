@@ -9,6 +9,53 @@ else
   return 0
 fi
 
+# Create a remote connection to the XAPI
+#
+# Parameters:
+#   $1[in]    : The XAPI FQDN/IP address to use
+#   $XEN_PORT : TCP port to conect (environment variable)
+#   $XEN_PWD  : Password to use for the connection (environment variable)
+#   $XEN_USER : User to use for the connection (environment variable)
+# Returns:
+#   0: If the connection was successfully tested
+#   1: If an error occurred
+xe_create_connection() {
+  local __host="$1"
+  if [[ -z ${__host} ]]; then
+    logError "Host not specified"
+    return 1
+  elif [[ -z ${XEN_USER} ]]; then
+    logError "User not specified"
+    return 1
+  elif [[ -z ${XEN_PWD} ]]; then
+    logError "Password not specified"
+    return 1
+  elif [[ -z ${XEN_PORT} ]]; then
+    logError "Port not specified"
+    return 1
+  fi
+
+  if ! command -v xe &>/dev/null; then
+    logError "xe tool not found"
+    return 1
+  fi
+
+  # Make sure the previous login is cleared
+  XE_LOGIN=""
+
+  local tmp_login
+  tmp_login=("-s" "${__host}" "-p" "${XEN_PORT}")
+  tmp_login+=("-u" "${XEN_USER}" "-pw" "${XEN_PWD}")
+
+  local __xe
+  if ! xe_exec __xe "${tmp_login[@]}" "help"; then
+    logError "Failed to connect to XAPI"
+    return 1
+  else
+    XE_LOGIN="${tmp_login[*]}"
+  fi
+}
+
 # Execute a xe command
 #
 # Parameters:
