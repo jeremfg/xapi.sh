@@ -6,6 +6,7 @@
 if [[ -z ${GUARD_XE_UTILS_SH} ]]; then
   GUARD_XE_UTILS_SH=1
 else
+  logWarn "Re-sourcing xe_utils.sh"
   return 0
 fi
 
@@ -41,18 +42,20 @@ xe_create_connection() {
   fi
 
   # Make sure the previous login is cleared
-  XE_LOGIN=""
+  XE_LOGIN=()
 
   local tmp_login
-  tmp_login=("-s" "${__host}" "-p" "${XEN_PORT}")
-  tmp_login+=("-u" "${XEN_USER}" "-pw" "${XEN_PWD}")
+  tmp_login=("-s" "${__host}")
+  tmp_login+=("-p" "${XEN_PORT}")
+  tmp_login+=("-u" "${XEN_USER}")
+  tmp_login+=("-pw" "${XEN_PWD}")
 
   local __xe
   if ! xe_exec __xe "${tmp_login[@]}" "help"; then
     logError "Failed to connect to XAPI"
     return 1
   else
-    XE_LOGIN="${tmp_login[*]}"
+    XE_LOGIN=("${tmp_login[@]}")
   fi
 }
 
@@ -74,18 +77,18 @@ xe_exec() {
     return 1
   fi
 
-  local __result __return_code
-  if [[ -z ${XE_LOGIN} ]]; then
-    __result=$(xe "$@" 2>&1)
-    __return_code=$?
+  local __actual_cmd __result __return_code
+  if [[ -z "${XE_LOGIN[*]}" ]]; then
+    __actual_cmd=("xe" "$@")
   else
-    __result=$(xe "${XE_LOGIN}" "$@" 2>&1)
-    __return_code=$?
+    __actual_cmd=("xe" "$@" "${XE_LOGIN[@]}")
   fi
+  __result=$("${__actual_cmd[@]}" 2>&1)
+  __return_code=$?
 
   if [[ ${__return_code} -ne 0 ]]; then
     logError <<EOF
-Failed to Execute command: xe ${XE_LOGIN} $*
+Failed to Execute command: ${__actual_cmd[*]}
 
 Return Code: ${__return_code}
 Output:
@@ -121,32 +124,55 @@ xe_parse_params() {
 
   local line key value
   while IFS= read -r line; do
-    # Remove leading and trailing whitespace
-    line=$(echo "${line}" | sed 's/^[ \t]*//;s/[ \t]*$//')
-
-    # Skip empty lines
-    if [[ -z "${line}" ]]; then
-      continue
+    if xe_read_param key value "${line}"; then
+      # Assign the key-value pair to the associative array
+      xe_params_array["${key}"]="${value}"
     fi
-
-    # Split the line into key and value
-    key=$(echo "${line}" | cut -d ':' -f 1 | sed 's/[ \t]*$//' || true)
-    value=$(echo "${line}" | cut -d ':' -f 2- | sed 's/^[ \t]*//' || true)
-
-    # Make sure key and value are not empty
-    if [[ -z "${key}" ]] || [[ -z "${value}" ]]; then
-      logWarn "Skipping invalid line: ${line}"
-      continue
-    fi
-
-    # Remove " ( RO)" from the key if present
-    # shellcheck disable=SC2001 # I prefer using sed to variable expansion
-    key=$(echo "${key}" | sed 's/ \(.*\)//')
-
-    # Assign the key-value pair to the associative array
-    xe_params_array["${key}"]="${value}"
-
   done <<<"${__result_response}"
+
+  return 0
+}
+
+# Parse a key=value pair
+#
+# Parameters:
+#   $1[out]: key read
+#   $2[out]: value read
+#   $3[in] : line to parse
+# Returns:
+#   0: If successfully parsed
+#   1: If the line did not contain relevant data
+xe_read_param() {
+  local __result_key="$1"
+  local __result_value="$2"
+  local __line="$3"
+
+  # Remove leading and trailing whitespace
+  __line=$(echo "${__line}" | sed 's/^[ \t]*//;s/[ \t]*$//')
+
+  # Skip empty lines
+  if [[ -z "${__line}" ]]; then
+    return 1
+  fi
+
+  # Split the line into key and value
+  local _key_ _value_
+  _key_=$(echo "${__line}" | cut -d ':' -f 1 | sed 's/[ \t]*$//' || true)
+  _value_=$(echo "${__line}" | cut -d ':' -f 2- | sed 's/^[ \t]*//' || true)
+
+  # Make sure key and value are not empty
+  if [[ -z "${_key_}" ]] || [[ -z "${_value_}" ]]; then
+    logWarn "Skipping invalid line: ${__line}"
+    return 1
+  fi
+
+  # Remove " ( RO)" from the key if present
+  # shellcheck disable=SC2001 # I prefer using sed to variable expansion
+  _key_=$(echo "${_key_}" | sed 's/ \(.*\)$//')
+
+  # Assign the key-value pair to the output variables
+  eval "${__result_key}='${_key_}'"
+  eval "${__result_value}='${_value_}'"
 
   return 0
 }

@@ -20,7 +20,7 @@ xe_current_host() {
   local _id="$1"
 
   local res
-  if ! xe_exec res host-list name-label="$(hostname || true)" --minimal; then
+  if ! xe_exec res host-list --minimal; then
     logError "Failed to get host"
     return 1
   elif [[ -z "${res}" ]]; then
@@ -33,6 +33,49 @@ xe_current_host() {
     eval "${_id}='${res}'"
     logInfo "Host: ${res} found"
     return 0
+  fi
+}
+
+# Create a pool and join it once it exists
+# NOTE: This is a missnomer, a pool always exists.
+# We will just be setting the label
+#
+# Parameters:
+#   $1[in]: Pool name
+# Returns:
+#   0: If pool was created and joined
+#   1: If any error occurred
+xe_pool_create() {
+  local _name="$1"
+
+  local cur_host
+  if ! xe_current_host cur_host; then
+    logError "Failed to get current host"
+    return 1
+  fi
+
+  local res pool_uuid
+  # Get the pool
+  if ! xe_exec pool_uuid pool-list --minimal; then
+    logError "Failed to get pool"
+    return 1
+  elif [[ -z "${pool_uuid}" ]]; then
+    logError "Pool not found"
+    return 1
+  elif ! xe_exec res pool-param-get uuid="${pool_uuid}" param-name=name-label --minimal; then
+    logError "Failed to get pool name"
+    return 1
+  elif [[ "${res}" == "${_name}" ]]; then
+    logInfo "Pool already configured"
+    return 0
+  else
+    logInfo "Pool found: ${res}"
+    if ! xe_exec res pool-param-set uuid="${pool_uuid}" name-label="${_name}"; then
+      logError "Failed to set pool name"
+      return 1
+    else
+      logInfo "Pool name set to ${_name}"
+    fi
   fi
 }
 
