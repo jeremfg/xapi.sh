@@ -27,7 +27,7 @@ xe_cleanup_network() {
   del_nets=()
 
   # Get host ID
-  if ! xe_current_host host_id; then
+  if ! xe_host_current host_id; then
     logError "Failed to get host"
     return 1
   fi
@@ -217,7 +217,7 @@ xe_validate_nic() {
   local _macs=("$@")
 
   local HOST_ID
-  if ! xe_current_host HOST_ID; then
+  if ! xe_host_current HOST_ID; then
     logError "Failed to get host"
     return 1
   fi
@@ -288,7 +288,7 @@ xe_vlan_config() {
   fi
 
   local cur_host
-  if ! xe_current_host cur_host; then
+  if ! xe_host_current cur_host; then
     logError "Failed to get current host"
     return 1
   fi

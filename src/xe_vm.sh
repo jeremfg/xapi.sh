@@ -60,7 +60,7 @@ xe_vm_prepare() {
   # Find or create the VM
   cmd=("vm-install" "new-name-label=${vm_name}" "params=uuid" "--minimal")
   cmd+=("template-uuid=${tmpl_uuid}" "sr-uuid=${sr_uuid}")
-  if ! xe_exec vm_uuid vm_list name-label="${vm_name}" params=uuid --minimal; then
+  if ! xe_exec vm_uuid vm-list name-label="${vm_name}" params=uuid --minimal; then
     logError "Failed to list VMs"
     return 1
   elif [[ -n "${vm_uuid}" ]]; then
@@ -93,7 +93,7 @@ xe_vm_prepare() {
         logError "Failed to rename disk ${disk_id}"
         return 1
       fi
-      if ! xe_exec res vdi_list uuid="${cur_uuid}" params=virtual-size --minimal; then
+      if ! xe_exec res vdi-list uuid="${cur_uuid}" params=virtual-size --minimal; then
         logError "Failed to get disk size for disk ${disk_id}"
         return 1
       elif [[ $((res / 1024 / 1024 / 1024)) -eq "${vm_disk}" ]]; then
@@ -139,13 +139,14 @@ xe_vm_prepare() {
     if ! xe_vm_vbd_next vbd_id "${vm_uuid}"; then
       return 1
     fi
-    cmd=(vbd-create "vm-uuid=${vm_uuid}" "device=${vbd_id}")
-    cmd+=("vdi-uuid=${vdi_uuid}" "type=Disk" "mode=RW" "--minimal")
     if ! xe_disk_create vdi_uuid "${disk_name}" "$((vm_disk * 1024 * 1024 * 1024))" "${sr_uuid}"; then
       logError "Failed to create disk for VM ${vm_name}"
       return 1
-    elif ! xe_exec "${cmd[@]}"; then
-      logError "Failed to attach disk to VM ${vm_name}"
+    fi
+    cmd=("vbd-create" "vm-uuid=${vm_uuid}" "device=${vbd_id}")
+    cmd+=("vdi-uuid=${vdi_uuid}" "type=Disk" "mode=RW" "--minimal")
+    if ! xe_exec res "${cmd[@]}"; then
+      logError "Failed to attach disk to VM ${vm_name}: ${res}"
       return 1
     else
       logInfo "Disk created and attached to VM ${vm_name}"
@@ -158,7 +159,7 @@ xe_vm_prepare() {
     return 1
   elif [[ $((res / 1024 / 1024 / 1024)) -ne "${vm_disk}" ]]; then
     logInfo "Disk ${vdi_uuid} has size $((res / 1024 / 1024 / 1024)) GiB. Resizing"
-    if ! xe_vm_shutdown "${vm_uuid}"; then
+    if ! xe_vm_shutdown "${vm_name}"; then
       logError "Failed to shutdown VM ${vm_name}"
       return 1
     elif ! xe_exec res vdi-resize uuid="${vdi_uuid}" disk-size="${vm_disk}GiB --minimal"; then
@@ -181,8 +182,8 @@ xe_vm_prepare() {
     return 1
   fi
   if [[ $((cur_max / 1024 / 1024)) -ne "${vm_mem}" ]] || [[ $((cur_min / 1024 / 1024)) -ne "${vm_mem}" ]]; then
-    logInfo "VM ${vm_name} has ${cur_max/ 1024 / 1024} MiB of RAM. Resizing"
-    if ! xe_vm_shutdown "${vm_uuid}"; then
+    logInfo "VM ${vm_name} has $((cur_max / 1024 / 1024)) MiB of RAM. Resizing"
+    if ! xe_vm_shutdown "${vm_name}"; then
       logError "Failed to shutdown VM ${vm_name}"
       return 1
     elif ! xe_exec res vm-memory-set "memory=${vm_mem}MiB" "uuid=${vm_uuid}" --minimal; then
@@ -202,7 +203,7 @@ xe_vm_prepare() {
     return 1
   elif [[ "${cur_cpu_count}" -ne "${vm_vcpus}" ]]; then
     logInfo "VM ${vm_name} has ${cur_cpu_count} VCPUs. Resizing"
-    if ! xe_vm_shutdown "${vm_uuid}"; then
+    if ! xe_vm_shutdown "${vm_name}"; then
       logError "Failed to shutdown VM ${vm_name}"
       return 1
     elif ! xe_exec res vm-param-set "VCPUs-max=${vm_vcpus}" "uuid=${vm_uuid}" --minimal; then
@@ -237,7 +238,7 @@ xe_vm_net_attach() {
   fi
 
   local vm_uuid net_uuid vifs vif vif_id res cmd
-  if ! xe_exec vm_uuid vm_list name-label="${vm_name}" params=uuid --minimal; then
+  if ! xe_exec vm_uuid vm-list name-label="${vm_name}" params=uuid --minimal; then
     logError "Failed to list VMs"
     return 1
   elif [[ -z "${vm_uuid}" ]]; then
@@ -271,14 +272,173 @@ xe_vm_net_attach() {
   fi
   cmd=("vif-create" "network-uuid=${net_uuid}" "vm-uuid=${vm_uuid}")
   cmd+=("device=${vif_id}" "mac=random" "--minimal")
-  if ! xe_vm_shutdown "${vm_uuid}"; then
+  if ! xe_vm_shutdown "${vm_name}"; then
     logError "Failed to shutdown VM ${vm_name}"
     return 1
   elif ! xe_exec vif "${cmd[@]}"; then
     logError "Failed to attach network ${net_name} to VM ${vm_name}"
     return 1
   else
-    logInfo "Network ${net_name} attached to VM ${vm_name} by: vif ${vif}"
+    logInfo "Network ${net_name} attached to VM ${vm_name} by vif ${vif}"
+  fi
+
+  return 0
+}
+
+# Attach PCI devices to a VM
+#
+# Parameters:
+#   $1[in]: VM name
+#   $2[in]: List of PCI devices
+# Returns:
+#   0: If PCI devices were attached
+#   1: If any error occurred
+xe_vm_pci_attach() {
+  local _vm="${1}"
+  local _devices="${2}"
+
+  local cmd res res2 vm_uuid availables device configured to_configure
+  if ! xe_exec vm_uuid vm-list "name-label=${_vm}" --minimal; then
+    logError "Failed to get VM"
+    return 1
+  elif [[ -z "${vm_uuid}" ]]; then
+    logError "VM not found"
+    return 1
+  fi
+
+  # Retrieve the list of configured devices
+  # xe vm-param-remove param-name=other-config param-key=pci uuid=<vm uuid>
+  cmd=(vm-param-get "uuid=${vm_uuid}" "param-name=other-config")
+  cmd+=("param-key=pci" "--minimal")
+  if ! xe_exec configured "${cmd[@]}"; then
+    # It's possible that zero PCI entry exists
+    if [[ "${configured}" == *"Key pci not found in map"* ]]; then
+      cmd=(vm-param-get "uuid=${vm_uuid}" "param-name=other-config")
+      cmd+=("--minimal")
+      if ! xe_exec configured "${cmd[@]}"; then
+        logError "Failed to get configured PCI devices: ${configured}"
+        return 1
+      elif [[ "${configured}" == *"pci"* ]]; then
+        logError "Failed to get configured PCI devices: ${configured}"
+        return 1
+      else
+        logInfo "No PCI devices configured: ${configured}"
+        configured=""
+      fi
+    fi
+  else
+    # FIXME: Try to understand why there are extra backslashes in this answer.
+    # Executing the same command locally yields clean output
+    logTrace "Response before cleanup: \"${configured}\""
+    configured="${configured//\\/}"
+    logTrace "Response after cleanup : \"${configured}\""
+  fi
+
+  # Retrieve the list of available devices
+  if ! xe_ssh_exec availables xl pci-assignable-list; then
+    logError "Failed to get available PCI devices: ${availables}"
+    return 1
+  fi
+
+  # Parse all the data into arrays
+  IFS=',' read -r -a configured <<<"${configured}"
+  IFS=',' read -r -a _devices <<<"${_devices}"
+  readarray -t availables <<<"${availables}"
+
+  # Trim all 3 arrays, we don't double-quote on purpose
+  # shellcheck disable=SC2206
+  configured=(${configured[@]})
+  # shellcheck disable=SC2206
+  _devices=(${_devices[@]})
+  # shellcheck disable=SC2206
+  availables=(${availables[@]})
+
+  logTrace <<EOF
+This is the information gathered:
+  Configured: ${configured[*]}
+  Availables: ${availables[*]}
+  Devices:    ${_devices[*]}
+EOF
+
+  # Find devices that are already configured
+  to_configure=()
+  for res in "${_devices[@]}"; do
+    if [[ " ${configured[*]} " =~ [[:space:]]0/0000:${res}[[:space:]] ]]; then
+      logTrace "Device ${res} already configured"
+      continue
+    else
+      logTrace "Device ${res} not configured"
+      to_configure+=("0/0000:${res}")
+    fi
+  done
+
+  if [[ ${#to_configure[@]} -eq 0 ]]; then
+    logInfo "No devices to configure"
+    return 0
+  fi
+
+  # For each one we need to configure, check if they are available
+  for device in "${to_configure[@]}"; do
+    res=0
+    for available in "${availables[@]}"; do
+      if [[ "${device}" == "0/${available}" ]]; then
+        logTrace "Device ${device} available"
+        res=1
+        break
+      fi
+    done
+    if [[ ${res} -eq 0 ]]; then
+      logError "Device ${device} not available"
+      return 1
+    fi
+  done
+
+  # For each device already configured, remember the extra ones
+  to_configure=()
+  for device in "${configured[@]}"; do
+    res2=0
+    for res in "${_devices[@]}"; do
+      if [[ "${device}" == "0/0000:${res}" ]]; then
+        res2=1
+        break
+      fi
+    done
+    if [[ ${res2} -eq 0 ]]; then
+      if [[ " ${to_configure[*]} " =~ [[:space:]]${device}[[:space:]] ]]; then
+        logWarn "Device ${device} already in list. Ignoring duplicate."
+      else
+        logTrace "Keeping existing device ${device}"
+        to_configure+=("${device}")
+      fi
+    fi
+  done
+
+  # Add all our devices
+  for device in "${_devices[@]}"; do
+    device="0/0000:${device}"
+    if [[ " ${to_configure[*]} " =~ [[:space:]]${device}[[:space:]] ]]; then
+      logWarn "Device ${device} already in list. Ignoring duplicate."
+    else
+      logTrace "Keeping existing device ${device}"
+      to_configure+=("${device}")
+    fi
+  done
+
+  # Build a comma separated list of devices to configure
+  res2=""
+  for device in "${to_configure[@]}"; do
+    res2+="${device},"
+  done
+  res2="${res2%,}"
+
+  if ! xe_vm_shutdown "${_vm}"; then
+    logError "Failed to shutdown VM ${_vm}"
+    return 1
+  elif ! xe_exec res vm-param-set "uuid=${vm_uuid}" "other-config:pci=${res2}"; then
+    logError "Failed to attach PCI devices"
+    return 1
+  else
+    logInfo "Attached PCI devices to VM ${_vm}"
   fi
 
   return 0
@@ -498,7 +658,7 @@ xe_vm_template() {
   fi
 
   local __res
-  if ! xe_exec __res template_list name-label="${template_name} params=uuid --minimal"; then
+  if ! xe_exec __res template-list name-label="${template_name}" "params=uuid" --minimal; then
     logError "Failed to list templates"
     return 1
   fi
@@ -571,19 +731,27 @@ xe_vm_tag_add() {
 # Start a VM
 #
 # Parameters:
-#   $1[in]: The VM UUID
+#   $1[in]: The VM name
 # Returns:
 #   0: If the VM was started
 #   1: If the VM couldn't be started
 xe_vm_start() {
-  local vm_uuid="${1}"
+  local vm_name="${1}"
 
-  if [[ -z "${vm_uuid}" ]]; then
+  if [[ -z "${vm_name}" ]]; then
     logError "Invalid VM"
     return 1
   fi
 
-  local cur_state
+  local cur_state vm_uuid
+  if ! xe_exec vm_uuid vm-list name-label="${vm_name}" params=uuid --minimal; then
+    logError "Failed to list VMs"
+    return 1
+  elif [[ -z "${vm_uuid}" ]]; then
+    logError "VM ${vm_name} not found"
+    return 1
+  fi
+
   if ! xe_exec cur_state vm-param-get "uuid=${vm_uuid}" param-name=power-state --minimal; then
     logError "Failed to get power-state for VM ${vm_uuid}"
     return 1
@@ -592,6 +760,9 @@ xe_vm_start() {
   if [[ "${cur_state}" == "running" ]]; then
     logInfo "VM ${vm_uuid} already running"
     return 0
+  elif [[ "${cur_state}" != "halted" ]]; then
+    logError "VM ${vm_uuid} is not halted: ${cur_state}"
+    return 1
   elif ! xe_exec res vm-start "uuid=${vm_uuid}" --minimal; then
     logError "Failed to start VM ${vm_uuid}: ${res}"
     return 1
@@ -613,6 +784,9 @@ xe_vm_start() {
     if [[ "${cur_state}" == "running" ]]; then
       logInfo "VM ${vm_uuid} running"
       break
+    elif [[ "${cur_state}" == "halted" ]]; then
+      logError "VM ${vm_uuid} returned to halted"
+      return 1
     elif [[ $(date +%s || true) -ge ${end_time} ]]; then
       logError "Timeout reached while waiting for VM ${vm_uuid} to start"
       return 1
@@ -625,19 +799,27 @@ xe_vm_start() {
 # Shutdown a VM
 #
 # Parameters:
-#   $1[in]: The VM UUID
+#   $1[in]: The VM name
 # Returns:
 #   0: If the VM was shutdown
 #   1: If the VM couldn't be shutdown
 xe_vm_shutdown() {
-  local vm_uuid="${1}"
+  local vm_name="${1}"
 
-  if [[ -z "${vm_uuid}" ]]; then
+  if [[ -z "${vm_name}" ]]; then
     logError "Invalid VM"
     return 1
   fi
 
-  local cur_state
+  local cur_state vm_uuid
+  if ! xe_exec vm_uuid vm-list name-label="${vm_name}" params=uuid --minimal; then
+    logError "Failed to list VMs"
+    return 1
+  elif [[ -z "${vm_uuid}" ]]; then
+    logError "VM ${vm_name} not found"
+    return 1
+  fi
+
   if ! xe_exec cur_state vm-param-get "uuid=${vm_uuid}" param-name=power-state --minimal; then
     logError "Failed to get power-state for VM ${vm_uuid}"
     return 1
@@ -646,6 +828,9 @@ xe_vm_shutdown() {
   if [[ "${cur_state}" == "halted" ]]; then
     logInfo "VM ${vm_uuid} already halted"
     return 0
+  elif [[ "${cur_state}" != "running" ]]; then
+    logError "VM ${vm_uuid} is not running: ${cur_state}"
+    return 1
   elif ! xe_exec res vm-shutdown "uuid=${vm_uuid}" --minimal; then
     logError "Failed to shutdown VM ${vm_uuid}: ${res}"
     return 1
@@ -667,6 +852,9 @@ xe_vm_shutdown() {
     if [[ "${cur_state}" == "halted" ]]; then
       logInfo "VM ${vm_uuid} halted"
       break
+    elif [[ "${cur_state}" == "running" ]]; then
+      logError "VM ${vm_uuid} still running"
+      return 1
     elif [[ $(date +%s || true) -ge ${end_time} ]]; then
       logError "Timeout reached while waiting for VM ${vm_uuid} to shutdown"
       return 1
@@ -718,6 +906,10 @@ fi
 # shellcheck source=src/xe_storage.sh
 if ! source "${XV_ROOT}/src/xe_storage.sh"; then
   logFatal "Failed to load xe_storage.sh"
+fi
+# shellcheck source=src/xe_storage.sh
+if ! source "${XV_ROOT}/src/xe_network.sh"; then
+  logFatal "Failed to load xe_network.sh"
 fi
 
 if [[ -p /dev/stdin ]] && [[ -z ${BASH_SOURCE[0]} ]]; then

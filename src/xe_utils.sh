@@ -56,6 +56,10 @@ xe_create_connection() {
     return 1
   else
     XE_LOGIN=("${tmp_login[@]}")
+    XE_BACKUP_HOST="${__host}"
+    XE_BACKUP_USR="${XEN_USER}"
+    XE_BACKUP_PWD="${XEN_PWD}"
+    XE_BACKUP_PORT="${XEN_PORT}"
   fi
 }
 
@@ -77,23 +81,87 @@ xe_exec() {
     return 1
   fi
 
-  local __actual_cmd __result __return_code
+  local __actual_cmd __printable_cmd __result __return_code
   if [[ -z "${XE_LOGIN[*]}" ]]; then
     __actual_cmd=("xe" "$@")
+    __printable_cmd=("xe" "$@")
   else
     __actual_cmd=("xe" "$@" "${XE_LOGIN[@]}")
+    __printable_cmd=("${XE_LOGIN[@]}")
+    __printable_cmd[7]="********"
+    __printable_cmd=("xe" "$@" "${__printable_cmd[*]}")
   fi
+
+  logTrace "Executing command: ${__printable_cmd[*]}"
   __result=$("${__actual_cmd[@]}" 2>&1)
   __return_code=$?
 
   if [[ ${__return_code} -ne 0 ]]; then
     logError <<EOF
-Failed to Execute command: ${__actual_cmd[*]}
+Failed to Execute command: ${__printable_cmd[*]}
 
 Return Code: ${__return_code}
 Output:
 ${__result}
 EOF
+  else
+    logTrace "Command executed successfully\n${__result}"
+  fi
+
+  eval "${__result_stdout}='${__result}'"
+
+  # shellcheck disable=SC2248
+  return ${__return_code}
+}
+
+# Execute a command on a XCP-ng host via SSH
+#
+# Parameters:
+#   $1[out]: The command output
+#   $@[in]: The command to execute
+# Returns:
+#   0: If the command was successfully executed
+#   1: If an error occurred (actual result code returned)
+xe_ssh_exec() {
+  local __result_stdout="${1}"
+  shift
+
+  if ! command -v ssh &>/dev/null; then
+    logError "ssh tool not found"
+    return 1
+  elif ! command -v sshpass &>/dev/null; then
+    logError "sshpass tool not found"
+    return 1
+  elif [[ -z "${XE_LOGIN}" ]]; then
+    logError "No XAPI connection available"
+    return 1
+  fi
+
+  # Since we have XE_LOGIN, we can assume we have the credentials for SSH as well
+  local __actual_cmd __printable_cmd __result __return_code
+  __actual_cmd=("sshpass" "-p" "${XE_BACKUP_PWD}")
+  __actual_cmd+=("ssh" "-o" "StrictHostKeyChecking=no")
+  __actual_cmd+=("${XE_BACKUP_USR}@${XE_BACKUP_HOST}")
+  __actual_cmd+=("$@")
+
+  # Make a printable version of the command that obfuscates the password
+  __printable_cmd=("${__actual_cmd[@]}")
+  __printable_cmd[2]="********"
+
+  logTrace "Executing command: ${__printable_cmd[*]}"
+  __result=$("${__actual_cmd[@]}" 2>&1)
+  __return_code=$?
+
+  if [[ ${__return_code} -ne 0 ]]; then
+    logError <<EOF
+Failed to Execute command: ${__printable_cmd[*]}
+
+Return Code: ${__return_code}
+Output:
+${__result}
+EOF
+  else
+    logTrace "Command executed successfully\n${__result}"
   fi
 
   eval "${__result_stdout}='${__result}'"
@@ -193,13 +261,18 @@ xe_join_params() {
   eval "${__result_string}='${res}'"
 }
 
+# Store login parameters (Used when working remotely)
+if [[ -z ${XE_LOGIN} ]]; then XE_LOGIN=""; fi
+
+# Variables
+XE_BACKUP_HOST=""
+XE_BACKUP_USR=""
+XE_BACKUP_PWD=""
+# shellcheck disable=SC2034
+XE_BACKUP_PORT=""
+
 # Associative array used for parameter parsing
 declare -gA xe_params_array
-
-# Store login parameters (Used when working remotely)
-if [[ -z ${XE_LOGIN} ]]; then
-  XE_LOGIN=""
-fi
 
 ###########################
 ###### Startup logic ######

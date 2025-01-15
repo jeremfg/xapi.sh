@@ -52,7 +52,7 @@ xe_stor_create_lvm() {
   local _res
 
   local _host_id
-  if ! xe_current_host _host_id; then
+  if ! xe_host_current _host_id; then
     logError "Failed to get host"
     return 1
   fi
@@ -118,7 +118,7 @@ xe_stor_create_iso() {
   local _res
 
   local _host_id
-  if ! xe_current_host _host_id; then
+  if ! xe_host_current _host_id; then
     logError "Failed to get host"
     return 1
   fi
@@ -309,9 +309,50 @@ xe_disk_create() {
   local _disk_size="$3"
   local _sr_uuid="$4"
 
-  local _res _cmd
+  local _res _cmd vdis vdi vdbs vdb
+  # First, check if we have a disk of that name already
+  if ! xe_exec vdis vdi-list sr-uuid="${_sr_uuid}" name-label="${_disk_name}" --minimal; then
+    logError "Failed to list disks: ${vdis}"
+    return 1
+  elif [[ -n "${vdis}" ]]; then
+    # Check if this disk is already attached to a VM or orphaned
+    IFS=',' read -r -a vdis <<<"${vdis}"
+    for vdi in "${vdis[@]}"; do
+      if ! xe_exec vdbs vbd-list vdi-uuid="${vdi}" --minimal; then
+        logError "Failed to list VBDs: ${vdbs}"
+        return 1
+      elif [[ -n "${vdbs}" ]]; then
+        IFS=',' read -r -a vdbs <<<"${vdbs}"
+        for vdb in "${vdbs[@]}"; do
+          if ! xe_exec _res vbd-param-get uuid="${vdb}" param-name=currently-attached --minimal; then
+            logError "Failed to get VBD state: ${_res}"
+            return 1
+          elif [[ "${_res}" == "true" ]]; then
+            logWarn "Disk ${_disk_name} is already attached to a VM. Ignoring..."
+          else
+            logError <<EOF
+We found a drive that is associated with a VDB, but not attached to a VM.
+This is a situation where we might be able to do something clever to re-use
+that disk. To be explored in the future if this corner case ever presents itself.
+If only to handle it better than with an error like today. Here is the output received:
+${_res}
+EOF
+            return 1
+          fi
+        done
+      else
+        logWarn "Disk ${_disk_name} is orphaned. We found what we wanted"
+        eval "${__result_disk_uuid}='${vdi}'"
+        return 0
+      fi
+    done
+  else
+    logInfo "Disk ${_disk_name} does not exist. Creating..."
+  fi
+
+  # If we reached here, we need to create a disk
   _cmd=("vdi-create" "name-label=${_disk_name}" "sr-uuid=${_sr_uuid}")
-  _cmd+=("virtual-size=${_disk_size}KiB" "--minimal")
+  _cmd+=("virtual-size=${_disk_size}" "--minimal")
   if ! xe_exec _res "${_cmd[@]}"; then
     logError "Failed to create disk ${_disk_name}: ${_res}"
     return 1
