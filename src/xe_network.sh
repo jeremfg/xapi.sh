@@ -18,7 +18,7 @@ fi
 #   0: Success
 #   1: Failure
 xe_cleanup_network() {
-  local _res good_nics suspicious_nics bad_nics del_pif del_nets nic line key value host_id
+  local _res _res2 good_nics suspicious_nics bad_nics del_pif del_nets nic line key value host_id
 
   good_nics=()
   suspicious_nics=()
@@ -33,35 +33,46 @@ xe_cleanup_network() {
   fi
 
   # Get all PIFs
-  if ! xe_exec _res pif-list; then
+  if ! xe_exec _res pif-list --minimal; then
     logError "Failed to list PIFs"
     return 1
   fi
 
-  # Get all "device" by reading every line of the response
-  while read -r line; do
-    if xe_read_param key value "${line}"; then
-      if [[ "${key}" == "device" ]]; then
-        # Check if the value takes the form "eth[0-9]+"
-        if [[ "${value}" =~ ^eth[0-9]+$ ]]; then
-          # Check if we already have the NIC in the good_nics array
-          if [[ " ${good_nics[*]} " =~ [[:space:]]${value}[[:space:]] ]]; then
-            logError "Duplicate NIC found: ${value}"
-            return 1
-          else
-            good_nics+=("${value}")
-          fi
+  IFS=',' read -r -a _res2 <<<"${_res}"
+  for nic in "${_res2[@]}"; do
+    if ! xe_exec _res pif-param-list uuid="${nic}"; then
+      logError "Failed to get details for PIF ${nic}"
+      return 1
+    elif ! xe_parse_params "${_res}"; then
+      logError "Failed to parse PIF ${nic}"
+      return 1
+    fi
+    local device vlan
+    device="${xe_params_array['device']}"
+    vlan="${xe_params_array['VLAN']}"
+    if [[ -z "${vlan}" ]] || [[ "${vlan}" == "-1" ]]; then
+      if [[ "${device}" =~ ^eth[0-9]+$ ]]; then
+        # Check if we already have the NIC in the good_nics array
+        if [[ " ${good_nics[*]} " =~ [[:space:]]${device}[[:space:]] ]]; then
+          logError "Duplicate NIC found: ${device}"
+          return 1
         else
-          if [[ " ${suspicious_nics[*]} " =~ [[:space:]]${value}[[:space:]] ]]; then
-            logError "Duplicate suspicious NIC found: ${value}"
-            return 1
-          else
-            suspicious_nics+=("${value}")
-          fi
+          logTrace "Remembering good NIC: ${device}"
+          good_nics+=("${device}")
+        fi
+      else
+        if [[ " ${suspicious_nics[*]} " =~ [[:space:]]${device}[[:space:]] ]]; then
+          logError "Duplicate suspicious NIC found: ${device}"
+          return 1
+        else
+          logTrace "Remembering suspicious NIC: ${device}"
+          suspicious_nics+=("${device}")
         fi
       fi
+    else
+      logTrace "Skipping VLAN ${vlan} interface on ${device}"
     fi
-  done <<<"${_res}"
+  done
 
   # Perform a scan
   if ! xe_exec _res pif-scan host-uuid="${host_id}"; then
@@ -70,30 +81,41 @@ xe_cleanup_network() {
   fi
 
   # Get all PIFs
-  if ! xe_exec _res pif-list; then
+  if ! xe_exec _res pif-list --minimal; then
     logError "Failed to list PIFs"
     return 1
   fi
 
   # Check if new NICs have appeared
-  while read -r line; do
-    if xe_read_param key value "${line}"; then
-      if [[ "${key}" == "device" ]]; then
-        if [[ " ${good_nics[*]} " =~ [[:space:]]${value}[[:space:]] ]]; then
-          continue
-        elif [[ " ${suspicious_nics[*]} " =~ [[:space:]]${value}[[:space:]] ]]; then
-          continue
+  IFS=',' read -r -a _res2 <<<"${_res}"
+  for nic in "${_res2[@]}"; do
+    if ! xe_exec _res pif-param-list uuid="${nic}"; then
+      logError "Failed to get details for PIF ${nic}"
+      return 1
+    elif ! xe_parse_params "${_res}"; then
+      logError "Failed to parse PIF ${nic}"
+      return 1
+    fi
+    local device vlan
+    device="${xe_params_array['device']}"
+    vlan="${xe_params_array['VLAN']}"
+    if [[ -z "${vlan}" ]] || [[ "${vlan}" == "-1" ]]; then
+      if [[ " ${good_nics[*]} " =~ [[:space:]]${device}[[:space:]] ]]; then
+        continue
+      elif [[ " ${suspicious_nics[*]} " =~ [[:space:]]${device}[[:space:]] ]]; then
+        continue
+      else
+        logInfo "New NIC found: ${device}"
+        if [[ "${device}" =~ ^eth[0-9]+$ ]]; then
+          good_nics+=("${device}")
         else
-          logInfo "New NIC found: ${value}"
-          if [[ "${value}" =~ ^eth[0-9]+$ ]]; then
-            good_nics+=("${value}")
-          else
-            suspicious_nics+=("${value}")
-          fi
+          suspicious_nics+=("${device}")
         fi
       fi
+    else
+      logTrace "Skipping VLAN ${vlan} interface on ${device}"
     fi
-  done <<<"${_res}"
+  done
 
   # Report on all suspicious NICs
   for nic in "${suspicious_nics[@]}"; do

@@ -161,7 +161,7 @@ xe_read_param() {
   _value_=$(echo "${__line}" | cut -d ':' -f 2- | sed 's/^[ \t]*//' || true)
 
   # Make sure key and value are not empty
-  if [[ -z "${_key_}" ]] || [[ -z "${_value_}" ]]; then
+  if [[ -z "${_key_}" ]]; then
     logWarn "Skipping invalid line: ${__line}"
     return 1
   fi
