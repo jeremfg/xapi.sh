@@ -493,9 +493,9 @@ xe_mgt_config() {
 }
 
 # External variables
-XEN_MGT=""
-XEN_MASK=""
-XEN_GW=""
+if [[ -z "${XEN_MGT}" ]]; then XEN_MGT=""; fi
+if [[ -z "${XEN_MASK}" ]]; then XEN_MASK=""; fi
+if [[ -z "${XEN_GW}" ]]; then XEN_GW=""; fi
 
 ###########################
 ###### Startup logic ######
