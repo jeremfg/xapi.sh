@@ -514,6 +514,32 @@ xe_mgt_config() {
   return 0
 }
 
+# Get the UUID of a network by name
+#
+# Parameters:
+#   $1[out]: The UUID of the network
+#   $2[in]: The name of the network
+# Returns:
+#   0: If the network was found
+#   1: If the network couldn't be found
+xe_net_uuid_by_name() {
+  local __result_net_uuid="${1}"
+  local _net_name="${2}"
+
+  local res
+  if ! xe_exec res network-list name-label="${_net_name}" --minimal; then
+    logError "Failed to list networks"
+    return 1
+  elif [[ -z "${res}" ]]; then
+    logError "No network found with name ${_net_name}"
+    return 1
+  else
+    eval "${__result_net_uuid}='${res}'"
+    logInfo "Network ${_net_name} found: ${res}"
+    return 0
+  fi
+}
+
 # External variables
 if [[ -z "${XEN_MGT}" ]]; then XEN_MGT=""; fi
 if [[ -z "${XEN_MASK}" ]]; then XEN_MASK=""; fi

@@ -262,6 +262,118 @@ xe_stor_unplug() {
   return 0
 }
 
+# Rename an existing disk
+#
+# Parameters:
+#   $1[in]: The UUID of the disk
+#   $2[in]: The new name of the disk
+# Returns:
+#   0: If the disk was renamed or its name was already the same
+#   1: If the disk couldn't be renamed
+xe_disk_rename() {
+  local _disk_uuid="$1"
+  local _new_name="$2"
+  local _res
+
+  if ! xe_exec _res vdi-param-get uuid="${_disk_uuid}" param-name=name-label --minimal; then
+    logError "Failed to get name of disk ${_disk_uuid}: ${_res}"
+    return 1
+  elif [[ "${_res}" == "${_new_name}" ]]; then
+    logInfo "Disk ${_disk_uuid} already named ${_new_name}"
+    return 0
+  fi
+
+  if ! xe_exec _res vdi-param-set uuid="${_disk_uuid}" name-label="${_new_name}"; then
+    logError "Failed to rename disk ${_disk_uuid} to ${_new_name}: ${_res}"
+    return 1
+  else
+    logInfo "Disk ${_disk_uuid} renamed to ${_new_name}"
+  fi
+
+  return 0
+}
+
+# Create a new disk
+#
+# Parameters:
+#   $1[out]: The UUID of the created disk
+#   $2[in]: The name of the disk
+#   $3[in]: The size of the disk (in Bytes)
+#   $4[in]: The SR UUID to store the disk
+# Returns:
+#   0: If the disk was created
+#   1: If the disk couldn't be created
+xe_disk_create() {
+  local __result_disk_uuid="$1"
+  local _disk_name="$2"
+  local _disk_size="$3"
+  local _sr_uuid="$4"
+
+  local _res _cmd
+  _cmd=("vdi-create" "name-label=${_disk_name}" "sr-uuid=${_sr_uuid}")
+  _cmd+=("virtual-size=${_disk_size}KiB" "--minimal")
+  if ! xe_exec _res "${_cmd[@]}"; then
+    logError "Failed to create disk ${_disk_name}: ${_res}"
+    return 1
+  elif [[ -z "${_res}" ]]; then
+    logError "Disk ${_disk_name} not returned creation"
+    return 1
+  else
+    logInfo "Disk ${_disk_name} created: ${_res}"
+  fi
+
+  eval "${__result_disk_uuid}='${_res}'"
+  return 0
+}
+
+# Find the UUID of a ISO by its name
+#
+# Parameters:
+#   $1[out]: The UUID of the ISO
+#   $2[in]: The name of the ISO
+# Returns:
+#   0: If the ISO was found
+#   1: If an error occured
+xe_iso_uuid_by_name() {
+  local __result_iso_uuid="$1"
+  local _iso_name="$2"
+
+  local _res _cmd cd_uuid cd_name line
+  if ! xe_exec _res cd-list; then
+    logError "Failed to list ISOs: ${_res}"
+    return 1
+  elif [[ -z "${_res}" ]]; then
+    logError "No ISO found"
+    return 1
+  fi
+
+  while IFS= read -r line; do
+    local _key _value
+    if ! xe_read_param _key _value "${line}"; then
+      logTrace "Failed to parse line: ${line}"
+      continue
+    elif [[ "${_key}" == "uuid" ]]; then
+      cd_uuid="${_value}"
+    elif [[ "${_key}" == "name-label" ]]; then
+      cd_name="${_value}"
+      # We rely on the fact that the UUID will be set before the name
+      if [[ "${cd_name}" == "${_iso_name}" ]]; then
+        eval "${__result_iso_uuid}='${cd_uuid}'"
+        logInfo "ISO ${_iso_name} found"
+        return 0
+      else
+        logTrace "ISO ${cd_name} skipped"
+      fi
+    else
+      logWarn "Unknown key: ${_key}"
+      continue
+    fi
+  done <<<"${_res}"
+
+  logError "ISO ${_iso_name} not found"
+  return 1
+}
+
 ###########################
 ###### Startup logic ######
 ###########################
