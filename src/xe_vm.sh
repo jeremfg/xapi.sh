@@ -32,7 +32,7 @@ xe_vm_prepare() {
 
   # Validate provided values
   if [[ -z "${vm_name}" ]] || [[ -z "${vm_mem}" ]] || [[ -z "${vm_vcpus}" ]] || [[ -z "${vm_disk}" ]]; then
-    logError "Invalid parameters"
+    logError "Invalid parameters in xe_vm_prepare"
     return 1
   elif [[ "${vm_mem}" -lt 256 ]] || [[ "${vm_mem}" -gt 65536 ]]; then
     logError "Invalid memory size: ${vm_mem}"
@@ -47,7 +47,7 @@ xe_vm_prepare() {
 
   # Validate assumed values
   if [[ -z "${VM_SR}" ]]; then
-    logError "Invalid parameters"
+    logError "Invalid environment: VM_SR not set"
     return 1
   fi
 
@@ -233,7 +233,7 @@ xe_vm_net_attach() {
   local net_name="${2}"
 
   if [[ -z "${vm_name}" ]] || [[ -z "${net_name}" ]]; then
-    logError "Invalid parameters"
+    logError "Invalid parameters in xe_vm_net_attach"
     return 1
   fi
 
@@ -457,15 +457,12 @@ xe_vm_iso_attach() {
   local iso_name="${2}"
 
   if [[ -z "${vm_name}" ]] || [[ -z "${iso_name}" ]]; then
-    logError "Invalid parameters"
+    logError "Invalid parameters in xe_vm_iso_attach"
     return 1
   fi
 
   local vm_uuid iso_uuid vbds vbd vbd_id res cmd
-  if [[ -z "${vm_name}" ]]; then
-    logError "Invalid parameters"
-    return 1
-  elif ! xe_exec vm_uuid vm_list name-label="${vm_name}" params=uuid --minimal; then
+  if ! xe_exec vm_uuid vm_list name-label="${vm_name}" params=uuid --minimal; then
     logError "Failed to list VMs"
     return 1
   elif [[ -z "${vm_uuid}" ]]; then
@@ -545,7 +542,7 @@ xe_vm_iso_eject() {
 
   local vm_uuid
   if [[ -z "${vm_name}" ]]; then
-    logError "Invalid parameters"
+    logError "Invalid parameters in xe_vm_iso_eject"
     return 1
   elif ! xe_exec vm_uuid vm_list name-label="${vm_name}" params=uuid --minimal; then
     logError "Failed to list VMs"

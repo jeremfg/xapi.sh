@@ -262,6 +262,35 @@ xe_stor_unplug() {
   return 0
 }
 
+# Rescan the content of the SR
+#
+# Parameters:
+#   $1[in]: The name of the SR
+# Returns:
+#   0: If the SR was refreshed
+#   1: If the SR couldn't be refreshed
+xe_stor_refresh() {
+  local _sr_name="$1"
+  local _sr_uuid _res
+
+  if ! xe_stor_uuid_by_name _sr_uuid "${_sr_name}"; then
+    logError "Failed to get UUID of SR ${_sr_name}"
+    return 1
+  elif [[ -z "${_sr_uuid}" ]]; then
+    logError "No SR found with name ${_sr_name}"
+    return 1
+  fi
+
+  if ! xe_exec _res sr-scan uuid="${_sr_uuid}"; then
+    logError "Failed to refresh SR ${_sr_name}: ${_res}"
+    return 1
+  else
+    logInfo "SR ${_sr_name} refreshed: ${_res}"
+  fi
+
+  return 0
+}
+
 # Rename an existing disk
 #
 # Parameters:
@@ -375,6 +404,7 @@ EOF
 # Returns:
 #   0: If the ISO was found
 #   1: If an error occured
+#   2; The ISO does not exist
 xe_iso_uuid_by_name() {
   local __result_iso_uuid="$1"
   local _iso_name="$2"
@@ -412,7 +442,7 @@ xe_iso_uuid_by_name() {
   done <<<"${_res}"
 
   logError "ISO ${_iso_name} not found"
-  return 1
+  return 2
 }
 
 ###########################
