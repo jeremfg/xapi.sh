@@ -462,7 +462,7 @@ xe_vm_iso_attach() {
   fi
 
   local vm_uuid iso_uuid vbds vbd vbd_id res cmd
-  if ! xe_exec vm_uuid vm_list name-label="${vm_name}" params=uuid --minimal; then
+  if ! xe_exec vm_uuid vm-list name-label="${vm_name}" params=uuid --minimal; then
     logError "Failed to list VMs"
     return 1
   elif [[ -z "${vm_uuid}" ]]; then
@@ -470,7 +470,10 @@ xe_vm_iso_attach() {
     return 1
   fi
 
-  # TODO: Find ISO UUID
+  # Get ISO UUID
+  if ! xe_iso_uuid_by_name iso_uuid "${iso_name}"; then
+    return 1
+  fi
 
   # Get a list of already attached ISOs
   cmd=("vm-cd-list" "uuid=${vm_uuid}" "vbd-params=none" "vdi-params=uuid")
@@ -501,17 +504,18 @@ xe_vm_iso_attach() {
   fi
 
   # If we reach here, we need to attach the ISO
-  if ! xe_exec vm-cd-insert "cd-name=${iso_name}" "uuid=${vm_uuid}" --minimal; then
-    logError "Failed to insert ISO ${iso_name} to VM ${vm_name}"
-    return 1
-  elif [[ -n "${res}" ]]; then
+  if xe_exec res vm-cd-insert "cd-name=${iso_name}" "uuid=${vm_uuid}" --minimal; then
+    logInfo "ISO ${iso_name} succesfully inserted to VM ${vm_name}"
+    return 0
+  elif [[ "${res}" == *"The VM has no empty CD drive"* ]]; then
     # This should mean we have no drive at all on this VM, on which to insert a CD
     logWarn "No CD drive found for VM ${vm_name}: ${res}"
-    cmd=("vm-cd-add" "cd-name=${iso_name}" "device=${vbd_id}")
-    cmd+=("uuid=${vm_uuid}" "--minimal")
     if ! xe_vm_vbd_next vbd_id "${vm_uuid}"; then
       return 1
-    elif ! xe_exec res "${cmd[@]}"; then
+    fi
+    cmd=("vm-cd-add" "cd-name=${iso_name}" "device=${vbd_id}")
+    cmd+=("uuid=${vm_uuid}" "--minimal")
+    if ! xe_exec res "${cmd[@]}"; then
       logError "Failed to attach ISO ${iso_name} to VM ${vm_name}"
       return 1
     elif [[ -n "${res}" ]]; then
@@ -525,8 +529,8 @@ EOF
       logInfo "ISO ${iso_name} attached to VM ${vm_name}"
     fi
   else
-    logInfo "ISO ${iso_name} succesfully inserted to VM ${vm_name}"
-    return 0
+    logError "Failed to insert ISO ${iso_name} to VM ${vm_name}: ${res}"
+    return 1
   fi
 }
 
@@ -544,7 +548,7 @@ xe_vm_iso_eject() {
   if [[ -z "${vm_name}" ]]; then
     logError "Invalid parameters in xe_vm_iso_eject"
     return 1
-  elif ! xe_exec vm_uuid vm_list name-label="${vm_name}" params=uuid --minimal; then
+  elif ! xe_exec vm_uuid vm-list name-label="${vm_name}" params=uuid --minimal; then
     logError "Failed to list VMs"
     return 1
   elif [[ -z "${vm_uuid}" ]]; then
