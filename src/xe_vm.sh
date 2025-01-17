@@ -201,19 +201,36 @@ xe_vm_prepare() {
   if ! xe_exec cur_cpu_count vm-param-get uuid="${vm_uuid}" param-name=VCPUs-max --minimal; then
     logError "Failed to get VCPUs-max for VM ${vm_name}"
     return 1
-  elif [[ "${cur_cpu_count}" -ne "${vm_vcpus}" ]]; then
-    logInfo "VM ${vm_name} has ${cur_cpu_count} VCPUs. Resizing"
+  elif [[ "${cur_cpu_count}" -lt "${vm_vcpus}" ]]; then
+    logInfo "VM ${vm_name} has ${cur_cpu_count} VCPUs MAX. Resizing"
     if ! xe_vm_shutdown "${vm_name}"; then
       logError "Failed to shutdown VM ${vm_name}"
       return 1
     elif ! xe_exec res vm-param-set "VCPUs-max=${vm_vcpus}" "uuid=${vm_uuid}" --minimal; then
-      logError "Failed to resize VCPUs for VM ${vm_name} to ${vm_vcpus}"
+      logError "Failed to resize VCPUs MAX for VM ${vm_name} to ${vm_vcpus}"
       return 1
     else
-      logInfo "VCPUs for VM ${vm_name} resized to ${vm_vcpus}"
+      logInfo "VCPUs MAX for VM ${vm_name} resized to ${vm_vcpus}"
     fi
   else
-    logInfo "VCPUs for VM ${vm_name} already has count ${vm_vcpus}"
+    logInfo "VCPUs MAX for VM ${vm_name} already has count ${vm_vcpus}"
+  fi
+  if ! xe_exec cur_cpu_count vm-param-get uuid="${vm_uuid}" param-name=VCPUs-at-startup --minimal; then
+    logError "Failed to get VCPUs-at-startup for VM ${vm_name}"
+    return 1
+  elif [[ "${cur_cpu_count}" -ne "${vm_vcpus}" ]]; then
+    logInfo "VM ${vm_name} has ${cur_cpu_count} VCPUs on startup. Resizing"
+    if ! xe_vm_shutdown "${vm_name}"; then
+      logError "Failed to shutdown VM ${vm_name}"
+      return 1
+    elif ! xe_exec res vm-param-set "VCPUs-at-startup=${vm_vcpus}" "uuid=${vm_uuid}" --minimal; then
+      logError "Failed to resize VCPUs at startup for VM ${vm_name} to ${vm_vcpus}"
+      return 1
+    else
+      logInfo "VCPUs for VM ${vm_name} resized to ${vm_vcpus} at startup"
+    fi
+  else
+    logInfo "VCPUs for VM ${vm_name} already has count ${vm_vcpus} at startup"
   fi
 
   # shellcheck disable=SC2248
