@@ -927,7 +927,7 @@ xe_vm_state() {
   esac
 }
 
-# External variables
+# Variables loaded externally
 
 # Constants
 VM_TEMPLATE_DEFAULT="Other install media"

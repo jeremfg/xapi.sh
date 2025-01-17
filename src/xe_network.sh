@@ -540,7 +540,7 @@ xe_net_uuid_by_name() {
   fi
 }
 
-# External variables
+# Variables loaded externally
 if [[ -z "${XEN_MGT}" ]]; then XEN_MGT=""; fi
 if [[ -z "${XEN_MASK}" ]]; then XEN_MASK=""; fi
 if [[ -z "${XEN_GW}" ]]; then XEN_GW=""; fi
