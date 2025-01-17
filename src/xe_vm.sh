@@ -46,14 +46,14 @@ xe_vm_prepare() {
   fi
 
   # Validate assumed values
-  if [[ -z "${VM_SR}" ]]; then
-    logError "Invalid environment: VM_SR not set"
+  if [[ -z "${VM_STOR_NAME}" ]]; then
+    logError "Invalid environment: VM_STOR_NAME not set"
     return 1
   fi
 
   if ! xe_vm_template tmpl_uuid; then
     return 1
-  elif ! xe_stor_uuid_by_name sr_uuid "${VM_SR}"; then
+  elif ! xe_stor_uuid_by_name sr_uuid "${VM_STOR_NAME}"; then
     return 1
   fi
 
@@ -880,6 +880,51 @@ xe_vm_shutdown() {
   done
 
   return 0
+}
+
+# Retrieve the current state of a VM
+#
+# Parameters:
+#   $1[out]: The state of the VM (running, halted)
+#   $1[in]: The VM name
+# Returns:
+#   0: If the state was retrieved
+#   1: If the state couldn't be retrieved
+xe_vm_state() {
+  local __result_STATE="${1}"
+  local __vm_name="${2}"
+
+  if [[ -z "${__vm_name}" ]]; then
+    logError "Invalid VM"
+    return 1
+  fi
+
+  local cur_state vm_uuid
+  if ! xe_exec vm_uuid vm-list name-label="${vm_name}" params=uuid --minimal; then
+    logError "Failed to list VMs"
+    return 1
+  elif [[ -z "${vm_uuid}" ]]; then
+    logError "VM ${vm_name} not found"
+    return 1
+  fi
+
+  if ! xe_exec cur_state vm-param-get "uuid=${vm_uuid}" param-name=power-state --minimal; then
+    logError "Failed to get power-state for VM ${vm_uuid}"
+    return 1
+  fi
+
+  case "${cur_state}" in
+  running)
+    eval "${__result_STATE}='running'"
+    ;;
+  halted)
+    eval "${__result_STATE}='halted'"
+    ;;
+  *)
+    logError "Unknown state: ${cur_state}"
+    return 1
+    ;;
+  esac
 }
 
 # External variables

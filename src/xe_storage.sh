@@ -168,6 +168,84 @@ xe_stor_create_iso() {
   return 1
 }
 
+# Create a new udev SR, if one of the same name doesn't exists
+#
+# Parameters:
+#   $1[out]: The UUID of the created SR
+#   $2[in]: The name of the SR
+#   $3[in]: The directory where the SR will find device simlinks
+# Returns:
+#   0: If the SR was created or already exists
+#   1: If the SR couldn't be created
+xe_stor_create_udev() {
+  local __result_sr_uuid="${1}"
+  local __sr_name="${2}"
+  local __path="${3}"
+
+  if [[ -z "${__sr_name}" ]]; then
+    logError "SR not specified"
+    return 1
+  elif [[ -z "${__path}" ]]; then
+    logError "Path not specified"
+    return 1
+  elif [[ ! -d "${__path}" ]]; then
+    logError "Path does not exist: ${__path}"
+    return 1
+  fi
+
+  local _host_id _res _cmd
+  if ! xe_host_current _host_id; then
+    logError "Failed to get host"
+    return 1
+  fi
+  xe_stor_uuid_by_name "${__result_sr_uuid}" "${__sr_name}"
+  _res=$?
+  case ${_res} in
+  0)
+    return 0
+    ;;
+  1)
+    return 1
+    ;;
+  2)
+    : # Continue, will be created
+    ;;
+  *)
+    logError "Unexpected return code: ${_res}"
+    return 1
+    ;;
+  esac
+
+  _cmd=(sr-create name-label="${__sr_name}" "type=udev")
+  _cmd+=("content-type=disk" "device-config:location=${__path}")
+  _cmd+=("host-uuid=${_host_id}")
+  if ! xe_exec _res "${_cmd[@]}"; then
+    logError "Failed to create SR ${__sr_name}: ${_res}"
+    return 1
+  else
+    logInfo "SR ${__sr_name} created: ${_res}"
+  fi
+
+  xe_stor_uuid_by_name "${__result_sr_uuid}" "${__sr_name}"
+  _res=$?
+  case ${_res} in
+  0)
+    return 0
+    ;;
+  1)
+    :
+    ;;
+  2)
+    logError "SR ${__sr_name} should have been found after creation"
+    ;;
+  *)
+    logError "Unexpected return code: ${_res}"
+    ;;
+  esac
+
+  return 1
+}
+
 # Plug an existing SR by name
 #
 # Parameters:
@@ -209,6 +287,10 @@ xe_stor_plug() {
     return 1
   elif [[ "${_res}" == "true" ]]; then
     logInfo "SR ${_sr_name} plugged successfully"
+    if ! xe_stor_refresh "${_sr_name}"; then
+      logError "Failed to refresh SR ${_sr_name}"
+      return 1
+    fi
     return 0
   else
     logInfo "Could not plug SR ${_sr_name}: ${_res}"
