@@ -885,7 +885,7 @@ xe_vm_shutdown() {
 # Retrieve the current state of a VM
 #
 # Parameters:
-#   $1[out]: The state of the VM (running, halted)
+#   $1[out]: The state of the VM (running, halted, not_exist)
 #   $1[in]: The VM name
 # Returns:
 #   0: If the state was retrieved
@@ -904,8 +904,9 @@ xe_vm_state() {
     logError "Failed to list VMs"
     return 1
   elif [[ -z "${vm_uuid}" ]]; then
-    logError "VM ${vm_name} not found"
-    return 1
+    logWarn "VM ${vm_name} not found"
+    eval "${__result_STATE}='not_exist'"
+    return 0
   fi
 
   if ! xe_exec cur_state vm-param-get "uuid=${vm_uuid}" param-name=power-state --minimal; then
