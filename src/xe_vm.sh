@@ -10,6 +10,104 @@ else
   return 0
 fi
 
+# Get all VMs with the specified tag
+#
+# Parameters:
+#   $1[out]: The variable to store the list of VM UUIDs
+#   $2[in] : The tag to search for
+# Returns:
+#   0: If the VMs were successfully retrieved
+#   1: If an error occurred
+xe_vm_list_by_tag() {
+  local __result_vms="${1}"
+  local __tag="${2}"
+
+  if [[ -z "${__tag}" ]]; then
+    logError "Tag not specified"
+    return 1
+  fi
+
+  local res
+  if ! xe_exec res vm-list tags:contains="${__tag}" --minimal; then
+    logError "Failed to list VMs by tag"
+    return 1
+  elif [[ -z "${res}" ]]; then
+    logInfo "No VMs found with tag ${__tag}"
+    eval "${__result_vms}=()"
+    return 0
+  else
+    eval "${__result_vms}=(\"${res//,/\" \"}\")"
+    return 0
+  fi
+}
+
+# Retrieve a list of every VM UUID that has a drive part of the specified SR
+#
+# Parameters:
+#   $1[out]: The variable to store the list of VM UUIDs
+#   $2[in] : The SR name to search for
+# Returns:
+#   0: If the VMs were successfully retrieved
+#   1: If an error occurred
+xe_vm_list_by_sr() {
+  local __result_vms="${1}"
+  local __sr="${2}"
+
+  if [[ -z "${__sr}" ]]; then
+    logError "SR not specified"
+    return 1
+  fi
+
+  # Get the UUID of the Storage Repository (SR)
+  local sr_uuid
+  if ! xe_exec sr_uuid sr-list name-label="${__sr}" --minimal; then
+    logError "Storage Repository ${__sr} not found"
+    return 1
+  fi
+
+  # Get the list of VDIs in the SR
+  local vdi_uuids
+  if ! xe_exec vdi_uuids vdi-list sr-uuid="${sr_uuid}" --minimal; then
+    logError "Failed to list VDIs in SR ${__sr}"
+    return 1
+  elif [[ -z "${vdi_uuids}" ]]; then
+    logInfo "No VDIs found in SR ${__sr}"
+    eval "${__result_vms}=()"
+    return 0
+  fi
+  IFS=',' read -r -a vdi_uuids <<<"${vdi_uuids}"
+
+  local vm_uuids vm_uuid vdi_uuid vbd_uuids
+  vm_uuids=()
+  for vdi_uuid in "${vdi_uuids[@]}"; do
+    if ! xe_exec vbd_uuids vbd-list vdi-uuid="${vdi_uuid}" --minimal; then
+      logError "Failed to list VBDs for VDI ${vdi_uuid}"
+      return 1
+    elif [[ -z "${vbd_uuids}" ]]; then
+      logInfo "No VBD found for VDI ${vdi_uuid}"
+    else
+      IFS=',' read -r -a vbd_uuids <<<"${vbd_uuids}"
+      for vbd_uuid in "${vbd_uuids[@]}"; do
+        if ! xe_exec vm_uuid vbd-param-get uuid="${vbd_uuid}" param-name=vm-uuid --minimal; then
+          logError "Failed to get VM for VBD ${vbd_uuid}"
+          return 1
+        elif [[ -n "${vm_uuid}" ]]; then
+          vm_uuids+=("${vm_uuid}")
+        fi
+      done
+    fi
+  done
+
+  if [[ ${#vm_uuids[@]} -eq 0 ]]; then
+    logInfo "No VMs found with VDIs in SR ${__sr}"
+    eval "${__result_vms}=()"
+    return 0
+  else
+    eval "${__result_vms}=(\"\${vm_uuids[@]}\")"
+    return 0
+  fi
+}
+
 # Prepare a virtual machine for execution
 #
 # Parameters:
@@ -885,7 +983,7 @@ xe_vm_shutdown() {
 # Retrieve the current state of a VM
 #
 # Parameters:
-#   $1[out]: The state of the VM (running, halted, not_exist)
+#   $1[out]: The state of the VM (see xe_vm_state_by_id for possible values)
 #   $1[in]: The VM name
 # Returns:
 #   0: If the state was retrieved
@@ -909,23 +1007,50 @@ xe_vm_state() {
     return 0
   fi
 
-  if ! xe_exec cur_state vm-param-get "uuid=${vm_uuid}" param-name=power-state --minimal; then
+  xe_vm_state_by_id "${__result_STATE}" "${vm_uuid}"
+  return $?
+}
+
+# Retrieve the current state of a VM by ID
+#
+# Parameters:
+#   $1[out]: The state of the VM (running, halted, not_exist)
+#   $1[in]: The VM UUID
+# Returns:
+#   0: If the state was retrieved
+#   1: If the state couldn't be retrieved
+xe_vm_state_by_id() {
+  local __result_STATE_UUID="${1}"
+  local __vm_uuid="${2}"
+
+  if [[ -z "${__vm_uuid}" ]]; then
+    logError "Invalid VM"
+    return 1
+  fi
+
+  if ! xe_exec cur_state vm-param-get "uuid=${__vm_uuid}" param-name=power-state --minimal; then
     logError "Failed to get power-state for VM ${vm_uuid}"
     return 1
+  elif [[ -z "${cur_state}" ]]; then
+    logWarn "VM ${vm_uuid} not found"
+    eval "${__result_STATE_UUID}='not_exist'"
+    return 0
   fi
 
   case "${cur_state}" in
   running)
-    eval "${__result_STATE}='running'"
+    eval "${__result_STATE_UUID}='running'"
     ;;
   halted)
-    eval "${__result_STATE}='halted'"
+    eval "${__result_STATE_UUID}='halted'"
     ;;
   *)
     logError "Unknown state: ${cur_state}"
     return 1
     ;;
   esac
+
+  return 0
 }
 
 # Variables loaded externally
