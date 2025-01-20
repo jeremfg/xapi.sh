@@ -41,6 +41,38 @@ xe_vm_list_by_tag() {
   fi
 }
 
+# Check if VM UUID does NOT have the specified tag
+#
+# Parameters:
+#   $1[in]: The VM UUID
+#   $2[in]: The tag to search for
+# Returns:
+#   0: If the VM does not have the tag
+#   1: If the VM has the tag
+xe_vm_not_tagged() {
+  local __vm_uuid="${1}"
+  local __tag="${2}"
+
+  if [[ -z "${__vm_uuid}" ]] || [[ -z "${__tag}" ]]; then
+    logError "VM UUID or tag not specified"
+    return 1
+  fi
+
+  local res
+  if ! xe_exec res vm-param-get uuid="${__vm_uuid}" param-name=tags --minimal; then
+    logError "Failed to get tags for VM ${__vm_uuid}"
+    return 1
+  fi
+  IFS=',' read -r -a res <<<"${res}"
+  if [[ " ${res[*]} " =~ [[:space:]]${__tag}[[:space:]] ]]; then
+    logInfo "VM ${__vm_uuid} has tag ${__tag}"
+    return 1
+  else
+    logInfo "VM ${__vm_uuid} does not have tag ${__tag}"
+    return 0
+  fi
+}
+
 # Retrieve a list of every VM UUID that has a drive part of the specified SR
 #
 # Parameters:
@@ -144,14 +176,14 @@ xe_vm_prepare() {
   fi
 
   # Validate assumed values
-  if [[ -z "${VM_STOR_NAME}" ]]; then
-    logError "Invalid environment: VM_STOR_NAME not set"
+  if [[ -z "${XCP_VM_SR_NAME}" ]]; then
+    logError "Invalid environment: XCP_VM_SR_NAME not set"
     return 1
   fi
 
   if ! xe_vm_template tmpl_uuid; then
     return 1
-  elif ! xe_stor_uuid_by_name sr_uuid "${VM_STOR_NAME}"; then
+  elif ! xe_stor_uuid_by_name sr_uuid "${XCP_VM_SR_NAME}"; then
     return 1
   fi
 
@@ -559,6 +591,134 @@ EOF
   return 0
 }
 
+# Attach all the given VDIs to a VM, and only them from the specified SR
+#
+# Parameters:
+#   $1[in]: The VM name
+#   $2[in]: The SR name
+#   $@[in]: The list of VDI uuids
+# Returns:
+#   0: If the VDIs were attached
+#   1: If the VDIs couldn't be attached
+xe_vm_attach_all_but_only_from_sr() {
+  local __vm_name="${1}"
+  local __sr_name="${2}"
+  shift 2
+
+  local __vm_uuid __sr_uuid __vdi_uuids __vdi_uuid __vbd_id __vbd_ids __cmd __res
+  if ! xe_exec __vm_uuid vm-list name-label="${__vm_name}" --minimal; then
+    logError "Failed to get VM ${__vm_name}"
+    return 1
+  elif [[ -z "${__vm_uuid}" ]]; then
+    logError "VM ${__vm_name} not found"
+    return 1
+  elif ! xe_stor_uuid_by_name __sr_uuid "${__sr_name}"; then
+    return 1
+  fi
+
+  # Get the list of VDIs in the SR
+  if ! xe_exec __vdi_uuids vdi-list sr-uuid="${__sr_uuid}" --minimal; then
+    logError "Failed to list VDIs in SR ${__sr_name}"
+    return 1
+  fi
+  IFS=',' read -r -a __vdi_uuids <<<"${__vdi_uuids}"
+
+  # Get the list of VBDs for the VM
+  if ! xe_exec __vbd_ids vm-vbd-list uuid="${__vm_uuid}" --minimal; then
+    logError "Failed to list VBDs for VM ${__vm_name}"
+    return 1
+  fi
+  IFS=',' read -r -a __vbd_ids <<<"${__vbd_ids}"
+
+  # For each VBD, check if the VID is part of the SR and desired
+  local vdbs_to_eject=()
+  for __vbd_id in "${__vbd_ids[@]}"; do
+    if ! xe_exec __vdi_uuid vbd-param-get uuid="${__vbd_id}" param-name=vdi-uuid --minimal; then
+      logError "Failed to get VDI UUID for VBD ${__vbd_id}"
+      return 1
+    fi
+    if [[ " ${__vdi_uuids[*]} " =~ [[:space:]]${__vdi_uuid}[[:space:]] ]]; then
+      logTrace "VDI ${__vdi_uuid} is part of SR ${__sr_name}"
+      # Is this a desired VDI?
+      if [[ " $* " =~ [[:space:]]${__vdi_uuid}[[:space:]] ]]; then
+        logTrace "VDI ${__vdi_uuid} is desired. Ignoring."
+      else
+        logTrace "VDI ${__vdi_uuid} is not desired. Marking for ejection"
+        vdbs_to_eject+=("${__vbd_id}")
+      fi
+    else
+      logTrace "VDI ${__vdi_uuid} is not part of SR ${__sr_name}. Ignoring..."
+      continue
+    fi
+  done
+
+  # Fpr each desired VDI, list the missing ones on the VM
+  local vdis_to_attach=()
+  local found=0
+  for __vdi_uuid in "$@"; do
+    if [[ " ${__vdi_uuids[*]} " =~ [[:space:]]${__vdi_uuid}[[:space:]] ]]; then
+      logTrace "VDI ${__vdi_uuid} is part of SR ${__sr_name}"
+      # Is this VDI already attached?
+      found=0
+      for __vbd_id in "${__vbd_ids[@]}"; do
+        if ! xe_exec __res vbd-param-get uuid="${__vbd_id}" param-name=vdi-uuid --minimal; then
+          logError "Failed to get VDI UUID for VBD ${__vbd_id}"
+          return 1
+        fi
+        if [[ "${__res}" == "${__vdi_uuid}" ]]; then
+          found=1
+          logTrace "VDI ${__vdi_uuid} already attached to VM ${__vm_name}. Ignoring"
+          break
+        fi
+      done
+      if [[ ${found} -eq 0 ]]; then
+        logTrace "VDI ${__vdi_uuid} is not attached to VM ${__vm_name}. Marking for attachment"
+        vdis_to_attach+=("${__vdi_uuid}")
+      fi
+    else
+      logTrace "VDI ${__vdi_uuid} is not part of SR ${__sr_name}. This is unexpected"
+      return 1
+    fi
+  done
+
+  # Do we have anything to eject or attach?
+  if [[ ${#vdbs_to_eject[@]} -eq 0 ]] && [[ ${#vdis_to_attach[@]} -eq 0 ]]; then
+    logInfo "No VDIs to eject or attach"
+    return 0
+  fi
+
+  # We have to modify the VM. First. Ensure shutdown
+  if ! xe_vm_shutdown "${__vm_name}"; then
+    logError "Failed to shutdown VM ${__vm_name}"
+    return 1
+  fi
+
+  # Do the ejections
+  for __vbd_id in "${vdbs_to_eject[@]}"; do
+    if ! xe_exec __res vbd-destroy uuid="${__vbd_id}"; then
+      logError "Failed to eject VDI ${__vbd_id}: ${__res}"
+      return 1
+    fi
+    logInfo "VDI ${__vbd_id} ejected from VM ${__vm_name}"
+  done
+
+  # Do the attachments
+  for __vdi_uuid in "${vdis_to_attach[@]}"; do
+    if ! xe_vm_vbd_next __vbd_id "${__vm_uuid}"; then
+      return 1
+    fi
+    __cmd=("vbd-create" "vm-uuid=${__vm_uuid}" "device=${__vbd_id}")
+    __cmd+=("vdi-uuid=${__vdi_uuid}" "type=Disk" "mode=RW" "--minimal")
+    if ! xe_exec __res "${__cmd[@]}"; then
+      logError "Failed to attach VDI ${__vdi_uuid} to VM ${__vm_name}: ${__res}"
+      return 1
+    fi
+    logInfo "VDI ${__vdi_uuid} attached to VM ${__vm_name}"
+  done
+
+  return 0
+}
+
 # Attach an ISO to a VM
 #
 # Parameters:
@@ -792,16 +952,16 @@ xe_vm_template() {
 # Add a tag to a VM
 #
 # Parameters:
-#   $1[in]: The VM UUID
+#   $1[in]: The VM name
 #   $2[in]: The tag names, comma separated
 # Returns:
 #   0: If the tag was added
 #   1: If the tag couldn't be added
 xe_vm_tag_add() {
-  local vm_uuid="$1"
+  local __vm_name="$1"
   local tag_names="$2"
 
-  if [[ -z "${vm_uuid}" ]]; then
+  if [[ -z "${__vm_name}" ]]; then
     logError "Invalid VM"
     return 1
   elif [[ -z "${tag_names}" ]]; then
@@ -810,11 +970,17 @@ xe_vm_tag_add() {
   fi
 
   # Desired tags
-  local __res tags tag tag2 cur_tags found
+  local __res tags tag tag2 cur_tags found vm_uuid
   IFS=',' read -r -a tags <<<"${tag_names}"
 
   # Current tags
-  if ! xe_exec __res vm-param-get "uuid=${vm_uuid}" param-name=tags --minimal; then
+  if ! xe_exec vm_uuid vm-list name-label="${__vm_name}" params=uuid --minimal; then
+    logError "Failed to list VMs"
+    return 1
+  elif [[ -z "${vm_uuid}" ]]; then
+    logError "VM ${__vm_name} not found"
+    return 1
+  elif ! xe_exec __res vm-param-get "uuid=${vm_uuid}" param-name=tags --minimal; then
     logError "Failed to get tags for VM ${vm_uuid}"
     return 1
   fi
@@ -916,14 +1082,19 @@ xe_vm_start() {
 #
 # Parameters:
 #   $1[in]: The VM name
+#   $2[in]: If set to "force", the VM will be shutdown regardless of XCP_CRITICAL_TAG
 # Returns:
 #   0: If the VM was shutdown
 #   1: If the VM couldn't be shutdown
 xe_vm_shutdown() {
   local vm_name="${1}"
+  local __force="${2}"
 
   if [[ -z "${vm_name}" ]]; then
     logError "Invalid VM"
+    return 1
+  elif [[ -z "${XCP_CRITICAL_TAG}" ]]; then
+    logError "Critical tag not set. Cannot verify if we are allowed to shutdown"
     return 1
   fi
 
@@ -947,7 +1118,18 @@ xe_vm_shutdown() {
   elif [[ "${cur_state}" != "running" ]]; then
     logError "VM ${vm_uuid} is not running: ${cur_state}"
     return 1
-  elif ! xe_exec res vm-shutdown "uuid=${vm_uuid}" --minimal; then
+  fi
+
+  # Unless "force", make sure the VM doesn't have tag XCP_CRITICAL_TAG
+  if [[ "${__force}" != "force" ]]; then
+    logTrace "Make sure VM ${vm_name} is not tagged ${XCP_CRITICAL_TAG}"
+    if ! xe_vm_not_tagged "${vm_uuid}" "${XCP_CRITICAL_TAG}"; then
+      logError "VM ${vm_uuid} has tag ${XCP_CRITICAL_TAG}. Not allowed to shutdown"
+      return 1
+    fi
+  fi
+
+  if ! xe_exec res vm-shutdown "uuid=${vm_uuid}" --minimal; then
     logError "Failed to shutdown VM ${vm_uuid}: ${res}"
     return 1
   else

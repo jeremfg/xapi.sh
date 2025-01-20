@@ -373,6 +373,40 @@ xe_stor_refresh() {
   return 0
 }
 
+# Retrieve the list of VDI UUIDs for a given store
+#
+# Parameters:
+#   $1[out]: The list of VDI UUIDs
+#   $2[in]: The name of the store
+# Returns:
+#   0: If the list was found
+#   1: If the list couldn't be found
+xe_stor_vdis() {
+  local __result_vdis="$1"
+  local _sr_name="$2"
+
+  local _sr_uuid _res _vdis
+  if ! xe_stor_uuid_by_name _sr_uuid "${_sr_name}"; then
+    logError "Failed to get UUID of SR ${_sr_name}"
+    return 1
+  elif [[ -z "${_sr_uuid}" ]]; then
+    logError "No SR found with name ${_sr_name}"
+    return 1
+  fi
+
+  if ! xe_exec _vdis vdi-list sr-uuid="${_sr_uuid}" --minimal; then
+    logError "Failed to list VDIs of SR ${_sr_name}: ${_vdis}"
+    return 1
+  elif [[ -z "${_vdis}" ]]; then
+    logWarn "No VDIs found in SR ${_sr_name}"
+    eval "${__result_vdis}=()"
+    return 0
+  fi
+  IFS=',' read -r -a _vdis <<<"${_vdis}"
+  eval "${__result_vdis}=(\"\${__result_vdis[@]}\")"
+  return 0
+}
+
 # Rename an existing disk
 #
 # Parameters:
