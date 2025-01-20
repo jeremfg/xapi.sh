@@ -605,7 +605,7 @@ xe_vm_attach_all_but_only_from_sr() {
   local __sr_name="${2}"
   shift 2
 
-  local __vm_uuid __sr_uuid __vdi_uuids __vdi_uuid __vbd_id __vbd_ids __cmd __res
+  local __vm_uuid __sr_uuid __vdi_uuids __vdi_uuid __vdi_id __vdi_ids __cmd __res
   if ! xe_exec __vm_uuid vm-list name-label="${__vm_name}" --minimal; then
     logError "Failed to get VM ${__vm_name}"
     return 1
@@ -624,19 +624,15 @@ xe_vm_attach_all_but_only_from_sr() {
   IFS=',' read -r -a __vdi_uuids <<<"${__vdi_uuids}"
 
   # Get the list of VBDs for the VM
-  if ! xe_exec __vbd_ids vm-vbd-list uuid="${__vm_uuid}" --minimal; then
+  if ! xe_exec __vdi_ids vm-disk-list uuid="${__vm_uuid}" --minimal; then
     logError "Failed to list VBDs for VM ${__vm_name}"
     return 1
   fi
-  IFS=',' read -r -a __vbd_ids <<<"${__vbd_ids}"
+  IFS=',' read -r -a __vdi_ids <<<"${__vdi_ids}"
 
   # For each VBD, check if the VID is part of the SR and desired
   local vdbs_to_eject=()
-  for __vbd_id in "${__vbd_ids[@]}"; do
-    if ! xe_exec __vdi_uuid vbd-param-get uuid="${__vbd_id}" param-name=vdi-uuid --minimal; then
-      logError "Failed to get VDI UUID for VBD ${__vbd_id}"
-      return 1
-    fi
+  for __vdi_uuid in "${__vdi_ids[@]}"; do
     if [[ " ${__vdi_uuids[*]} " =~ [[:space:]]${__vdi_uuid}[[:space:]] ]]; then
       logTrace "VDI ${__vdi_uuid} is part of SR ${__sr_name}"
       # Is this a desired VDI?
@@ -644,7 +640,7 @@ xe_vm_attach_all_but_only_from_sr() {
         logTrace "VDI ${__vdi_uuid} is desired. Ignoring."
       else
         logTrace "VDI ${__vdi_uuid} is not desired. Marking for ejection"
-        vdbs_to_eject+=("${__vbd_id}")
+        vdbs_to_eject+=("${__vdi_uuid}")
       fi
     else
       logTrace "VDI ${__vdi_uuid} is not part of SR ${__sr_name}. Ignoring..."
@@ -659,19 +655,9 @@ xe_vm_attach_all_but_only_from_sr() {
     if [[ " ${__vdi_uuids[*]} " =~ [[:space:]]${__vdi_uuid}[[:space:]] ]]; then
       logTrace "VDI ${__vdi_uuid} is part of SR ${__sr_name}"
       # Is this VDI already attached?
-      found=0
-      for __vbd_id in "${__vbd_ids[@]}"; do
-        if ! xe_exec __res vbd-param-get uuid="${__vbd_id}" param-name=vdi-uuid --minimal; then
-          logError "Failed to get VDI UUID for VBD ${__vbd_id}"
-          return 1
-        fi
-        if [[ "${__res}" == "${__vdi_uuid}" ]]; then
-          found=1
-          logTrace "VDI ${__vdi_uuid} already attached to VM ${__vm_name}. Ignoring"
-          break
-        fi
-      done
-      if [[ ${found} -eq 0 ]]; then
+      if [[ " ${__vdi_ids[*]} " =~ [[:space:]]${__vdi_uuid}[[:space:]] ]]; then
+        logTrace "VDI ${__vdi_uuid} already attached to VM ${__vm_name}. Ignoring"
+      else
         logTrace "VDI ${__vdi_uuid} is not attached to VM ${__vm_name}. Marking for attachment"
         vdis_to_attach+=("${__vdi_uuid}")
       fi

@@ -19,7 +19,7 @@ fi
 #   1: If an error occured
 #   2: If the SR wasn't found
 xe_stor_uuid_by_name() {
-  local __sr_uuid="$1"
+  local __result_sr_uuid="$1"
   local __sr_name="$2"
   local __res
 
@@ -28,7 +28,7 @@ xe_stor_uuid_by_name() {
     return 1
   elif [[ -n "${__res}" ]]; then
     logInfo "SR ${__sr_name} found"
-    eval "${__sr_uuid}='${__res}'"
+    eval "${__result_sr_uuid}='${__res}'"
     return 0
   fi
 
@@ -403,7 +403,7 @@ xe_stor_vdis() {
     return 0
   fi
   IFS=',' read -r -a _vdis <<<"${_vdis}"
-  eval "${__result_vdis}=(\"\${__result_vdis[@]}\")"
+  eval "${__result_vdis}=(\"\${_vdis[@]}\")"
   return 0
 }
 
