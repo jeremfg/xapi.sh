@@ -1079,9 +1079,6 @@ xe_vm_shutdown() {
   if [[ -z "${vm_name}" ]]; then
     logError "Invalid VM"
     return 1
-  elif [[ -z "${XCP_CRITICAL_TAG}" ]]; then
-    logError "Critical tag not set. Cannot verify if we are allowed to shutdown"
-    return 1
   fi
 
   local cur_state vm_uuid
@@ -1093,33 +1090,57 @@ xe_vm_shutdown() {
     return 1
   fi
 
-  if ! xe_exec cur_state vm-param-get "uuid=${vm_uuid}" param-name=power-state --minimal; then
-    logError "Failed to get power-state for VM ${vm_uuid}"
+  xe_vm_shutdown_by_id "${vm_uuid}" "${__force}"
+  return $?
+}
+
+# Shutdown a VM
+#
+# Parameters:
+#   $1[in]: The VM UUID
+#   $2[in]: If set to "force", the VM will be shutdown regardless of XCP_CRITICAL_TAG
+# Returns:
+#   0: If the VM was shutdown
+#   1: If the VM couldn't be shutdown
+xe_vm_shutdown_by_id() {
+  local __vmsh_uuid="${1}"
+  local __vmsh_force="${2}"
+
+  if [[ -z "${__vmsh_uuid}" ]]; then
+    logError "Invalid VM"
+    return 1
+  elif [[ -z "${XCP_CRITICAL_TAG}" ]]; then
+    logError "Critical tag not set. Cannot verify if we are allowed to shutdown"
+    return 1
+  fi
+
+  if ! xe_exec cur_state vm-param-get "uuid=${__vmsh_uuid}" param-name=power-state --minimal; then
+    logError "Failed to get power-state for VM ${__vmsh_uuid}"
     return 1
   fi
 
   if [[ "${cur_state}" == "halted" ]]; then
-    logInfo "VM ${vm_uuid} already halted"
+    logInfo "VM ${__vmsh_uuid} already halted"
     return 0
   elif [[ "${cur_state}" != "running" ]]; then
-    logError "VM ${vm_uuid} is not running: ${cur_state}"
+    logError "VM ${__vmsh_uuid} is not running: ${cur_state}"
     return 1
   fi
 
   # Unless "force", make sure the VM doesn't have tag XCP_CRITICAL_TAG
   if [[ "${__force}" != "force" ]]; then
-    logTrace "Make sure VM ${vm_name} is not tagged ${XCP_CRITICAL_TAG}"
-    if ! xe_vm_not_tagged "${vm_uuid}" "${XCP_CRITICAL_TAG}"; then
-      logError "VM ${vm_uuid} has tag ${XCP_CRITICAL_TAG}. Not allowed to shutdown"
+    logTrace "Make sure VM ${__vmsh_uuid} is not tagged ${XCP_CRITICAL_TAG}"
+    if ! xe_vm_not_tagged "${__vmsh_uuid}" "${XCP_CRITICAL_TAG}"; then
+      logError "VM ${__vmsh_uuid} has tag ${XCP_CRITICAL_TAG}. Not allowed to shutdown"
       return 1
     fi
   fi
 
-  if ! xe_exec res vm-shutdown "uuid=${vm_uuid}" --minimal; then
-    logError "Failed to shutdown VM ${vm_uuid}: ${res}"
+  if ! xe_exec res vm-shutdown "uuid=${__vmsh_uuid}" --minimal; then
+    logError "Failed to shutdown VM ${__vmsh_uuid}: ${res}"
     return 1
   else
-    logInfo "VM ${vm_uuid} shutdown commanded"
+    logInfo "VM ${__vmsh_uuid} shutdown commanded"
   fi
 
   # Wait for the VM to shutdown (max 10 minutes)
@@ -1128,19 +1149,19 @@ xe_vm_shutdown() {
   while true; do
     sleep 1
 
-    if ! xe_exec cur_state vm-param-get "uuid=${vm_uuid}" param-name=power-state --minimal; then
-      logError "Failed to get power-state for VM ${vm_uuid}"
+    if ! xe_exec cur_state vm-param-get "uuid=${__vmsh_uuid}" param-name=power-state --minimal; then
+      logError "Failed to get power-state for VM ${__vmsh_uuid}"
       return 1
     fi
 
     if [[ "${cur_state}" == "halted" ]]; then
-      logInfo "VM ${vm_uuid} halted"
+      logInfo "VM ${__vmsh_uuid} halted"
       break
     elif [[ "${cur_state}" == "running" ]]; then
-      logError "VM ${vm_uuid} still running"
+      logError "VM ${__vmsh_uuid} still running"
       return 1
     elif [[ $(date +%s || true) -ge ${end_time} ]]; then
-      logError "Timeout reached while waiting for VM ${vm_uuid} to shutdown"
+      logError "Timeout reached while waiting for VM ${__vmsh_uuid} to shutdown"
       return 1
     fi
   done
