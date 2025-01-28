@@ -540,7 +540,6 @@ xe_mgt_config() {
     logInfo "Management IF has wrong gateway: ${res}"
   else
     logInfo "Management IF already configured"
-    # TODO Set network name to Mgmt
     return 0
   fi
 
