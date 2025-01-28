@@ -112,7 +112,7 @@ xe_pool_current() {
 #   0: If host is the pool master
 #   1: If any error occurred
 #   2: If host is not the pool master
-xe_pool_is_masater() {
+xe_pool_is_master() {
   local cur_host cur_pool cur_master res
 
   if ! xe_host_current cur_host; then
@@ -155,7 +155,7 @@ xe_email_configure() {
     logError "BIN_DIR is not set"
     return 1
   fi
-  if ! xe_pool_is_masater; then
+  if ! xe_pool_is_master; then
     logError "Host is not the pool master. Do not configure email"
     return 0
   fi
