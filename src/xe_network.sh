@@ -461,7 +461,7 @@ xe_mgt_config() {
   fi
 
   # 1. Find the PIF uuid
-  local res pif_uuid
+  local res nets pif_uuid net_uuid
   if ! xe_identify_nic "${_nic}"; then
     logError "Failed to identify NIC ${_nic}"
     return 1
@@ -472,7 +472,52 @@ xe_mgt_config() {
     return 1
   fi
 
-  # Check it's using static configuration
+  # 2. Try to identify the main network associated with it
+  if ! xe_exec res network-list PIF-uuids="${pif_uuid}" --minimal; then
+    logError "Failed to list networks for NIC ${_nic}"
+    return 1
+  fi
+  IFS=',' read -r -a nets <<<"${res}"
+  if [[ ${#nets[@]} -eq 0 ]]; then
+    logError "Failed to get networks for NIC ${_nic}"
+    return 1
+  else
+    logWarn "NIC ${_nic} is part of multiple(s) network(s)"
+    local qty net
+    qty=0
+    for net in "${nets[@]}"; do
+      qty=$((qty + 1))
+      if ! xe_exec res network-param-get uuid="${net}" param-name=name-label; then
+        logError "Failed to get network name for ${net}"
+        return 1
+      fi
+      if [[ ${qty} -gt 1 ]]; then
+        logWarn "Too many networks with ${res}. TODO: Find a way to filter"
+        return 1
+      else
+        net_uuid="${net}"
+      fi
+    done
+  fi
+  logInfo "Identified main network: ${net_uuid}"
+
+  # 3. Name that interface "Mgmt"
+  if ! xe_exec res network-param-get uuid="${net_uuid}" param-name=name-label; then
+    logError "Failed to get name for network ${net_uuid}"
+    return 1
+  elif [[ "${res}" == "Mgmt" ]]; then
+    logInfo "Name already set to Mgmt for network ${net_uuid}"
+  else
+    logInfo "Setting name to Mgmt for network ${net_uuid}"
+    if ! xe_exec res network-param-set uuid="${net_uuid}" name-label=Mgmt; then
+      logError "Failed to set name for network ${net_uuid}"
+      return 1
+    else
+      logInfo "Name set to Mgmt for network ${net_uuid}"
+    fi
+  fi
+
+  # 4. Check the pif is using the proper static configuration
   if ! xe_exec res pif-param-get uuid="${pif_uuid}" param-name=IP-configuration-mode; then
     logError "Failed to get IP configuration mode for management IF"
     return 1
