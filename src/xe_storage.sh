@@ -9,6 +9,88 @@ else
   return 0
 fi
 
+# Find a local SR matching the provided characteristics
+#
+# Parameters:
+#   $1[out]: The UUID of the found SR
+#   $2[in]: The type of the SR to search for
+#   $3[in]: The content-type of the SR to search for
+# Returns:
+#   0: If the SR was found
+#   1: If an error occured
+#   2: If the SR wasn't found
+xe_stor_local_find() {
+  local __result_sr_uuid="${1}"
+  local _type="${2}"
+  local _content_type="${3}"
+
+  local _res _cmd host_uuid host_name
+  if ! xe_host_current host_uuid; then
+    logError "Failed to get host"
+    return 1
+  elif [[ -z "${host_uuid}" ]]; then
+    logError "No host found"
+    return 1
+  elif ! xe_exec host_name host-list uuid="${host_uuid}" params=name-label --minimal; then
+    logError "Failed to get host name: ${host_name}"
+    return 1
+  elif [[ -z "${host_name}" ]]; then
+    logError "No host name found"
+    return 1
+  elif ! xe_exec _res sr-list host="${host_name}" type="${_type}" content-type="${_content_type}" --minimal; then
+    logError "Failed to list SRs: ${_res}"
+    return 1
+  elif [[ -z "${_res}" ]]; then
+    logWarn "No SR found"
+    return 2
+  elif [[ "${_res}" == *","* ]]; then
+    logWarn "Multiple SRs found"
+    return 1
+  else
+    eval "${__result_sr_uuid}='${_res}'"
+    logInfo "SR ${_res} found"
+    return 0
+  fi  
+}
+
+# Rename the specified SR
+#
+# Parameters:
+#   $1[in]: The UUID of the SR
+#   $2[in]: The new name of the SR
+# Returns:
+#   0: If the SR now bears the desired name
+#   1: If an error occured
+xe_stor_rename() {
+  local _sr_uuid="${1}"
+  local _new_name="${2}"
+  local _res
+
+  if [[ -z "${_new_name}" ]]; then
+    logError "New name not specified"
+    return 1
+  elif [[ -z "${_sr_uuid}" ]]; then
+    logError "SR not specified"
+    return 1
+  fi
+
+  # Get the current name, changing it only if it's different
+  if ! xe_exec _res sr-param-get uuid="${_sr_uuid}" param-name=name-label --minimal; then
+    logError "Failed to get name of SR ${_sr_uuid}: ${_res}"
+    return 1
+  elif [[ "${_res}" == "${_new_name}" ]]; then
+    logInfo "SR ${_sr_uuid} already named ${_new_name}"
+    return 0
+  elif ! xe_exec _res sr-param-set uuid="${_sr_uuid}" name-label="${_new_name}"; then
+    logError "Failed to rename SR ${_sr_uuid} to ${_new_name}: ${_res}"
+    return 1
+  else
+    logInfo "SR ${_sr_uuid} renamed to ${_new_name}"
+  fi
+
+  return 0  
+}
+
 # Retrive the UUID of the SR by name
 #
 # Parameters:
