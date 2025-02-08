@@ -633,7 +633,7 @@ xe_vm_usb_attach() {
   elif [[ "${vm_uuid}" == *","* ]]; then
     logError "Multiple VMs found with name ${vm_name}"
     return 1
-  elif xe_exec usb_uuid usb-list "vendor-id=${usb_vid}" "product-id=${usb_pid}" "serial-number=${usb_sn}" --minimal; then
+  elif ! xe_exec usb_uuid pusb-list "vendor-id=${usb_vid}" "product-id=${usb_pid}" "serial=${usb_sn}" --minimal; then
     logError "Failed to get USB device"
     return 1
   elif [[ -z "${usb_uuid}" ]]; then
