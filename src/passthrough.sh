@@ -98,7 +98,7 @@ passthrough_usb_configure() {
     fi
 
     # Iterate over each line of lsusb to find the correct device
-    local line bus device udevadm_output cur_sn res
+    local line bus device udevadm_output cur_sn usb_res
     cur_sn=""
     while IFS= read -r line; do
       # Extract bus and device number
@@ -165,9 +165,18 @@ EOF
       local policy
       policy="ALLOW:vid=${vid} pid=${pid} # Edited by scripts"
       if ! grep -q "${policy}" "${USB_POLICY_FILE}"; then
-        logInfo "USB policy not found for ${usb}, adding it"
+        logInfo "USB policy not found for ${usb}"
+
+        # Backup the file first if never been backed up
+        if [[ ! -f "${USB_POLICY_FILE}.bak" ]]; then
+          if ! cp "${USB_POLICY_FILE}" "${USB_POLICY_FILE}.bak"; then
+            logError "Failed to backup USB policy file"
+            return 1
+          fi
+        fi
+
         # Add policy as the first line that is not a comment
-        if ! sed -i "/^[^#]/i ${policy}" "${USB_POLICY_FILE}"; then
+        if ! sed -i "0,/^[^#]/s//${policy}\n&/" "${USB_POLICY_FILE}"; then
           logError "Failed to add USB policy for ${usb}"
           return 1
         else
@@ -181,14 +190,18 @@ EOF
           return 1
         else
           logInfo "Scanning for USB devices in Xen"
-          if ! xe_host_current res; then
+          if ! xe_host_current usb_res; then
             logError "Failed to get current host"
             return 1
-          elif ! xe_exec res pusb-scan "host-uuid=${res}"; then
+          elif ! xe_exec usb_res pusb-scan "host-uuid=${usb_res}"; then
             logError "Failed to scan for USB devices in Xen"
             return 1
           else
             scan_performed=1
+            if ! sleep 1; then
+              logError "Failed to sleep"
+              return 1
+            fi
           fi
         fi
       fi
@@ -244,7 +257,7 @@ while [[ -L "${PI_SOURCE}" ]]; do # resolve $PI_SOURCE until the file is no long
   [[ ${PI_SOURCE} != /* ]] && PI_SOURCE=${PI_ROOT}/${PI_SOURCE} # if $PI_SOURCE was a relative symlink, we need to resolve it relative to the path where the symlink file was located
 done
 PI_ROOT=$(cd -P "$(dirname "${PI_SOURCE}")" >/dev/null 2>&1 && pwd)
-PI_ROOT=$(realpath "${PI_ROOT}/../..")
+PI_ROOT=$(realpath "${PI_ROOT}/..")
 
 # Determine BPKG's global prefix
 if [[ -z "${PREFIX}" ]]; then
