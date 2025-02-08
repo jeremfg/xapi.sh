@@ -591,6 +591,100 @@ EOF
   return 0
 }
 
+# Attach a USB device to a VM
+#
+# Parameters:
+#   $1[in]: The VM name
+#   $2[in]: The USB VID
+#   $3[in]: The USB PID
+#   $4[in]: The USB SN
+# Returns:
+#   0: If the USB device was attached
+#   1: If the USB device couldn't be attached
+xe_vm_usb_attach() {
+  local vm_name="${1}"
+  local usb_vid="${2}"
+  local usb_pid="${3}"
+  local usb_sn="${4}"
+
+  # Validate input
+  if [[ -z "${vm_name}" ]]; then
+    logError "VM name not specified"
+    return 1
+  elif [[ -z "${usb_vid}" ]]; then
+    logError "USB VID not specified"
+    return 1
+  elif [[ -z "${usb_pid}" ]]; then
+    logError "USB PID not specified"
+    return 1
+  elif [[ -z "${usb_sn}" ]]; then
+    logError "USB SN not specified"
+    return 1
+  fi
+
+  # Obtain the UUIDs
+  local vm_uuid usb_uuid cmd res
+  if ! xe_exec vm_uuid vm-list name-label="${vm_name}" --minimal; then
+    logError "Failed to get VM ${vm_name}"
+    return 1
+  elif [[ -z "${vm_uuid}" ]]; then
+    logError "VM ${vm_name} not found"
+    return 1
+  elif [[ "${vm_uuid}" == *","* ]]; then
+    logError "Multiple VMs found with name ${vm_name}"
+    return 1
+  elif xe_exec usb_uuid usb-list "vendor-id=${usb_vid}" "product-id=${usb_pid}" "serial-number=${usb_sn}" --minimal; then
+    logError "Failed to get USB device"
+    return 1
+  elif [[ -z "${usb_uuid}" ]]; then
+    logError "USB device not found"
+    return 1
+  elif [[ "${usb_uuid}" == *","* ]]; then
+    logError "Multiple USB devices found with VID ${usb_vid}, PID ${usb_pid}, SN ${usb_sn}"
+    return 1
+  fi
+
+  # Check if VM already has the USB device attached
+  local vusb_device group_uuid
+  vusb_devices=()
+  if ! xe_exec res vusb-list "vm-uuid=${vm_uuid}" --minimal; then
+    logError "Failed to list USB devices for VM ${vm_name}"
+    return 1
+  elif [[ -n "${res}" ]]; then
+    IFS=',' read -r -a vusb_devices <<<"${res}"
+  fi
+  for vusb_device in "${vusb_devices[@]}"; do
+    if ! xe_exec res usb-group-list "PUSB-uuids:contains=${usb_uuid}" "VUSB-uuids:contains=${vusb_device}" --minimal; then
+      logError "Failed to list USB group devices"
+      return 1
+    elif [[ -n "${res}" ]]; then
+      logInfo "USB device ${usb_uuid} already attached to VM ${vm_name}"
+      return 0
+    fi
+  done
+
+  # If we reach here, we need to attach the USB device
+  if ! xe_vm_shutdown "${vm_name}"; then
+    logError "Failed to shutdown VM ${vm_name} before attaching USB device"
+    return 1
+  elif ! xe_exec group_uuid usb-group-list "PUSB-uuids=${usb_uuid}" --minimal; then
+    logError "Failed to create USB group"
+    return 1
+  elif [[ -z "${group_uuid}" ]]; then
+    logError "USB group not found"
+    return 1
+  elif ! xe_exec res vusb-create "vm-uuid=${vm_uuid}" "usb-group-uuid=${group_uuid}" --minimal; then
+    logError "Failed to attach USB device to VM ${vm_name}"
+    return 1
+  elif [[ -z "${res}" ]]; then
+    logError "Failed to attach USB device to VM ${vm_name}"
+    return 1
+  else
+    logInfo "USB device ${usb_uuid} attached to VM ${vm_name}: ${res}"
+    return 0
+  fi
+}
+
 # Attach all the given VDIs to a VM, and only them from the specified SR
 #
 # Parameters:
