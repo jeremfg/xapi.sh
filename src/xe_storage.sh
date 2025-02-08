@@ -50,7 +50,7 @@ xe_stor_local_find() {
     eval "${__result_sr_uuid}='${_res}'"
     logInfo "SR ${_res} found"
     return 0
-  fi  
+  fi
 }
 
 # Rename the specified SR
@@ -88,7 +88,7 @@ xe_stor_rename() {
     logInfo "SR ${_sr_uuid} renamed to ${_new_name}"
   fi
 
-  return 0  
+  return 0
 }
 
 # Retrive the UUID of the SR by name

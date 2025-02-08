@@ -14,7 +14,6 @@
 passthrough_pci_configure() {
   local pciback_arg
 
-  
   for pci in "${@}"; do
     local desc
     desc=$(lspci -s "${pci}")
@@ -51,7 +50,7 @@ passthrough_pci_configure() {
 # Returns:
 #   0: Success
 #   1: Failure
-passthrough_usb_configure () {
+passthrough_usb_configure() {
   local usb var_usb_vid var_usb_pid var_usb_sn scan_performed
   scan_performed=0
 
@@ -79,7 +78,7 @@ passthrough_usb_configure () {
     logError "Failed to load xe_host.sh"
     return 1
   fi
-  
+
   local vid pid sn usb_output
   for usb in "${@}"; do
     var_usb_vid="UDEV_VID_${usb}"
@@ -132,7 +131,7 @@ passthrough_usb_configure () {
         logWarn "Found a similar USB device to ${usb}, but with serial number ${cur_sn}"
         cur_sn=""
       fi
-    done <<< "${usb_output}"
+    done <<<"${usb_output}"
 
     if [[ -z "${cur_sn}" ]]; then
       logError "Failed to find USB device: ${usb}"
