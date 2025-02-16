@@ -1305,6 +1305,17 @@ xe_vm_start_by_id() {
       fi
     done <<<"${__res}"
 
+    local cur_state
+    if ! xe_vm_state_by_id cur_state "${__vm}"; then
+      logError "Failed to get state for VM ${__vm_name}"
+      return 1
+    elif [[ "${cur_state}" == "running" ]]; then
+      logInfo "VM ${__vm_name} already running"
+      continue
+    elif [[ "${cur_state}" != "halted" ]]; then
+      logWarn "VM ${__vm_name} is in an unexpected state: ${cur_state}"
+    fi
+
     logTrace "Starting VM: ${__vm_name}"
     if ! xe_exec __res vm-start "uuid=${__vm}" --minimal; then
       logError "Failed to start VM: ${__vm_name}"
@@ -1426,11 +1437,18 @@ xe_vm_shutdown_by_id() {
   # If we reach here, we can shut down all these VMs
   for __vm in "${@}"; do
     {
-      logTrace "Shutting down VM: ${__vm}"
-      if ! xe_exec __res vm-shutdown "uuid=${__vm}" --minimal; then
-        logError "Failed to shutdown VM: ${__vm}"
+      local state
+      if ! xe_vm_state_by_id state "${__vm}"; then
+        logError "Failed to get state for VM ${__vm}"
+      elif [[ "${state}" != "halted" ]]; then
+        logTrace "Shutting down VM: ${__vm} currently in state ${state}"
+        if ! xe_exec __res vm-shutdown "uuid=${__vm}" --minimal; then
+          logError "Failed to shutdown VM: ${__vm}"
+        else
+          logInfo "Shutdown of VM ${__vm} successful"
+        fi
       else
-        logInfo "Shutdown of VM ${__vm} successful"
+        logInfo "VM ${__vm} already halted"
       fi
     } &
   done
