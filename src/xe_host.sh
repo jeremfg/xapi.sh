@@ -20,7 +20,17 @@ xe_host_current() {
   local _id="$1"
 
   local res __host
-  __host=$(hostname)
+
+  # Retrieve hostname
+  if [[ -z "${XE_LOGIN}" ]]; then
+    __host=$(hostname)
+  else
+    if ! xe_host_exec __host "hostname"; then
+      logError "Failed to get remote's hostname"
+      return 1
+    fi
+  fi
+
   if ! xe_exec res "host-list" "name-label=${__host}" --minimal; then
     logError "Failed to get host"
     return 1
