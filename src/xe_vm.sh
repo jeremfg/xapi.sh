@@ -482,7 +482,7 @@ xe_vm_pci_attach() {
   fi
 
   # Retrieve the list of available devices
-  if ! xe_ssh_exec availables xl pci-assignable-list; then
+  if ! xe_host_exec availables xl pci-assignable-list; then
     logError "Failed to get available PCI devices: ${availables}"
     return 1
   fi

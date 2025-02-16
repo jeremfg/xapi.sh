@@ -114,6 +114,50 @@ EOF
   return ${__return_code}
 }
 
+# Execute a command on a XCP-ng host
+#
+# Parameters:
+#   $1[out]: The command output
+#   $@[in]: The command to execute
+# Returns:
+#   0: If the command was successfully executed
+#   1: If an error occurred (actual result code returned)
+xe_host_exec() {
+  local __stdout_xe_host_exec="${1}"
+  shift
+
+  local __host_exec_ret_code
+
+  if [[ -n "${XE_LOGIN[*]}" ]]; then
+    # We need to execute remotely
+    xe_ssh_exec "${__stdout_xe_host_exec}" "${@}"
+    return $?
+  fi
+
+  # If we reach here, it means we need to execute the command locally
+  local __host_exec_ret_code __host_exec_output
+  logTrace "Executing host command: ${*}"
+  __host_exec_output=$("${@}" 2>&1)
+  __host_exec_ret_code=$?
+
+  if [[ ${__host_exec_ret_code} -ne 0 ]]; then
+    logError <<EOF
+Failed to execute host command: ${*}
+
+Return Code: ${__host_exec_ret_code}
+Output:
+${__host_exec_output}
+EOF
+  else
+    logTrace "Command executed successfully${IFS}${__host_exec_output}"
+  fi
+
+  printf -v "${__stdout_xe_host_exec}" '%s' "${__host_exec_output}"
+
+  # shellcheck disable=SC2248
+  return ${__host_exec_ret_code}
+}
+
 # Execute a command on a XCP-ng host via SSH
 #
 # Parameters:
@@ -148,13 +192,13 @@ xe_ssh_exec() {
   __printable_cmd=("${__actual_cmd[@]}")
   __printable_cmd[2]="********"
 
-  logTrace "Executing command: ${__printable_cmd[*]}"
+  logTrace "Executing remote command: ${__printable_cmd[*]}"
   __result=$("${__actual_cmd[@]}" 2>&1)
   __return_code=$?
 
   if [[ ${__return_code} -ne 0 ]]; then
     logError <<EOF
-Failed to Execute command: ${__printable_cmd[*]}
+Failed to execute remote command: ${__printable_cmd[*]}
 
 Return Code: ${__return_code}
 Output:
@@ -164,7 +208,7 @@ EOF
     logTrace "Command executed successfully\n${__result}"
   fi
 
-  eval "${__result_stdout}='${__result}'"
+  printf -v "${__result_stdout}" '%s' "${__result}"
 
   # shellcheck disable=SC2248
   return ${__return_code}
