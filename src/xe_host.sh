@@ -19,8 +19,9 @@ fi
 xe_host_current() {
   local _id="$1"
 
-  local res
-  if ! xe_exec res host-list --minimal; then
+  local res __host
+  __host=$(hostname)
+  if ! xe_exec res "host-list" "name-label=${__host}" --minimal; then
     logError "Failed to get host"
     return 1
   elif [[ -z "${res}" ]]; then

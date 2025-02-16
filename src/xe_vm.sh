@@ -10,67 +10,174 @@ else
   return 0
 fi
 
-# Get all VMs with the specified tag
+# Get all the VMs matching at least one of the given tags
 #
 # Parameters:
 #   $1[out]: The variable to store the list of VM UUIDs
-#   $2[in] : The tag to search for
+#   $2[in]: Set to "local" if the scrope should be limited to the current host
+#   $@[in]: The list of tags to search for
 # Returns:
 #   0: If the VMs were successfully retrieved
 #   1: If an error occurred
-xe_vm_list_by_tag() {
-  local __result_vms="${1}"
-  local __tag="${2}"
+xe_vm_list_tagged() {
+  local __result_tagged_vms="${1}"
+  local __scope="${2}"
+  shift 2
 
-  if [[ -z "${__tag}" ]]; then
-    logError "Tag not specified"
+  if [[ -z "${__result_tagged_vms}" ]]; then
+    logError "Result variable not specified"
+    return 1
+  elif [[ -z "${__scope}" ]]; then
+    logWarn "Scope not specified. Assuming all"
+    __scope="all"
+  fi
+
+  # Build the command
+  local __cmd __res
+  __cmd=("vm-list" "is-control-domain=false" "params=uuid,name-label,tags")
+  if [[ "${__scope}" == "local" ]]; then
+    if ! xe_current_host __res; then
+      logError "Failed to get current host"
+      return 1
+    else
+      __cmd+=("resident-on=${__res}")
+    fi
+  elif [[ "${__scope}" != "all" ]]; then
+    if xe_exec __res host-list "name-label=${__scope}" --minimal; then
+      logError "Failed to get host UUID for ${__scope}"
+      return 1
+    elif [[ -z "${__res}" ]]; then
+      logError "Host ${__scope} not found"
+      return 1
+    elif [[ "${res}" == *","* ]]; then
+      logError "Multiple hosts found for ${__scope}"
+      return 1
+    else
+      __cmd+=("resident-on=${__res}")
+    fi
+  fi
+
+  if ! xe_exec __res "${cmd[@]}"; then
+    logError "Failed to list VMs"
     return 1
   fi
 
-  local res
-  if ! xe_exec res vm-list tags:contains="${__tag}" --minimal; then
-    logError "Failed to list VMs by tag"
-    return 1
-  elif [[ -z "${res}" ]]; then
-    logInfo "No VMs found with tag ${__tag}"
-    eval "${__result_vms}=()"
-    return 0
-  else
-    eval "${__result_vms}=(\"${res//,/\" \"}\")"
-    return 0
-  fi
+  local __tag _line _key _value _cur_uuid _cur_name found
+  local __vm_uuids=()
+  local __tags=()
+  while IFS= read -r _line; do
+    if xe_read_param _key _value "${_line}"; then
+      if [[ "${_key}" == "uuid" ]]; then
+        found=0
+        _cur_uuid="${_value}"
+      elif [[ "${_key}" == "name-label" ]]; then
+        _cur_name="${_value}"
+      elif [[ "${_key}" == "tags" ]]; then
+        IFS=',' read -r -a __tags <<<"${_value}"
+        for __tag in "${__tags[@]}"; do
+          if [[ " ${*} " =~ [[:space:]]${__tag}[[:space:]] ]]; then
+            logTrace "VM ${_cur_name} has tag ${__tag}"
+            found=1
+            __vm_uuids+=("${_cur_uuid}")
+            break
+          fi
+        done
+        if [[ "${found}" -eq 0 ]]; then
+          logTrace "VM ${_cur_name} does not have any of the specified tags"
+        fi
+      else
+        logWarn "Unknown key ${_key} for VM ${_cur_uuid}"
+      fi
+    fi
+  done <<<"${__res}"
+
+  eval "${__result_tagged_vms}=(\"\${__vm_uuids[@]}\")"
+  return 0
 }
 
-# Check if VM UUID does NOT have the specified tag
+# Get all the VMs for which none of the given tags match
 #
 # Parameters:
-#   $1[in]: The VM UUID
-#   $2[in]: The tag to search for
+#   $1[out]: The variable to store the list of VM UUIDs
+#   $2[in]: Set to "local", "all" or a specific hostname if the scrope should be limited
+#   $@: The list of tags to search for
 # Returns:
-#   0: If the VM does not have the tag
-#   1: If the VM has the tag
-xe_vm_not_tagged() {
-  local __vm_uuid="${1}"
-  local __tag="${2}"
+#   0: If the VMs were successfully retrieved
+#   1: If an error occurred
+xe_vm_list_not_tagged() {
+  local __result_tagged_vms="${1}"
+  local __scope="${2}"
+  shift 2
 
-  if [[ -z "${__vm_uuid}" ]] || [[ -z "${__tag}" ]]; then
-    logError "VM UUID or tag not specified"
+  if [[ -z "${__result_tagged_vms}" ]]; then
+    logError "Result variable not specified"
+    return 1
+  elif [[ -z "${__scope}" ]]; then
+    logWarn "Scope not specified. Assuming all"
+    __scope="all"
+  fi
+
+  # Build the command
+  local __cmd __res
+  __cmd=("vm-list" "is-control-domain=false" "params=uuid,name-label,tags")
+  if [[ "${__scope}" == "local" ]]; then
+    if ! xe_current_host __res; then
+      logError "Failed to get current host"
+      return 1
+    else
+      __cmd+=("resident-on=${__res}")
+    fi
+  elif [[ "${__scope}" != "all" ]]; then
+    if xe_exec __res host-list "name-label=${__scope}" --minimal; then
+      logError "Failed to get host UUID for ${__scope}"
+      return 1
+    elif [[ -z "${__res}" ]]; then
+      logError "Host ${__scope} not found"
+      return 1
+    elif [[ "${res}" == *","* ]]; then
+      logError "Multiple hosts found for ${__scope}"
+      return 1
+    else
+      __cmd+=("resident-on=${__res}")
+    fi
+  fi
+
+  if ! xe_exec __res "${cmd[@]}"; then
+    logError "Failed to list VMs"
     return 1
   fi
 
-  local res
-  if ! xe_exec res vm-param-get uuid="${__vm_uuid}" param-name=tags --minimal; then
-    logError "Failed to get tags for VM ${__vm_uuid}"
-    return 1
-  fi
-  IFS=',' read -r -a res <<<"${res}"
-  if [[ " ${res[*]} " =~ [[:space:]]${__tag}[[:space:]] ]]; then
-    logInfo "VM ${__vm_uuid} has tag ${__tag}"
-    return 1
-  else
-    logInfo "VM ${__vm_uuid} does not have tag ${__tag}"
-    return 0
-  fi
+  local __tag _line _key _value _cur_uuid _cur_name found
+  local __vm_uuids=()
+  local __tags=()
+  while IFS= read -r _line; do
+    if xe_read_param _key _value "${_line}"; then
+      if [[ "${_key}" == "uuid" ]]; then
+        found=0
+        _cur_uuid="${_value}"
+      elif [[ "${_key}" == "name-label" ]]; then
+        _cur_name="${_value}"
+      elif [[ "${_key}" == "tags" ]]; then
+        IFS=',' read -r -a __tags <<<"${_value}"
+        for __tag in "${__tags[@]}"; do
+          if [[ " ${*} " =~ [[:space:]]${__tag}[[:space:]] ]]; then
+            logTrace "VM ${_cur_name} has tag ${__tag}"
+            found=1
+            break
+          fi
+        done
+        if [[ "${found}" -eq 0 ]]; then
+          __vm_uuids+=("${_cur_uuid}")
+          logTrace "VM ${_cur_name} does not have any of the specified tags"
+        fi
+      else
+        logWarn "Unknown key ${_key} for VM ${_cur_uuid}"
+      fi
+    fi
+  done <<<"${__res}"
+
+  eval "${__result_tagged_vms}=(\"\${__vm_uuids[@]}\")"
+  return 0
 }
 
 # Retrieve a list of every VM UUID that has a drive part of the specified SR
@@ -136,6 +243,38 @@ xe_vm_list_by_sr() {
     return 0
   else
     eval "${__result_vms}=(\"\${vm_uuids[@]}\")"
+    return 0
+  fi
+}
+
+# Check if VM UUID does NOT have the specified tag
+#
+# Parameters:
+#   $1[in]: The VM UUID
+#   $2[in]: The tag to search for
+# Returns:
+#   0: If the VM does not have the tag
+#   1: If the VM has the tag
+xe_vm_not_tagged() {
+  local __vm_uuid="${1}"
+  local __tag="${2}"
+
+  if [[ -z "${__vm_uuid}" ]] || [[ -z "${__tag}" ]]; then
+    logError "VM UUID or tag not specified"
+    return 1
+  fi
+
+  local res
+  if ! xe_exec res vm-param-get uuid="${__vm_uuid}" param-name=tags --minimal; then
+    logError "Failed to get tags for VM ${__vm_uuid}"
+    return 1
+  fi
+  IFS=',' read -r -a res <<<"${res}"
+  if [[ " ${res[*]} " =~ [[:space:]]${__tag}[[:space:]] ]]; then
+    logInfo "VM ${__vm_uuid} has tag ${__tag}"
+    return 1
+  else
+    logInfo "VM ${__vm_uuid} does not have tag ${__tag}"
     return 0
   fi
 }
@@ -1105,7 +1244,7 @@ xe_vm_start() {
     return 1
   fi
 
-  local cur_state vm_uuid
+  local vm_uuid
   if ! xe_exec vm_uuid vm-list name-label="${vm_name}" params=uuid --minimal; then
     logError "Failed to list VMs"
     return 1
@@ -1114,48 +1253,85 @@ xe_vm_start() {
     return 1
   fi
 
-  if ! xe_exec cur_state vm-param-get "uuid=${vm_uuid}" param-name=power-state --minimal; then
-    logError "Failed to get power-state for VM ${vm_uuid}"
+  if ! xe_vm_start_by_id "${vm_uuid}"; then
+    logError "Failed to start VM ${vm_name}"
     return 1
   fi
-
-  if [[ "${cur_state}" == "running" ]]; then
-    logInfo "VM ${vm_uuid} already running"
-    return 0
-  elif [[ "${cur_state}" != "halted" ]]; then
-    logError "VM ${vm_uuid} is not halted: ${cur_state}"
-    return 1
-  elif ! xe_exec res vm-start "uuid=${vm_uuid}" --minimal; then
-    logError "Failed to start VM ${vm_uuid}: ${res}"
-    return 1
-  else
-    logInfo "VM ${vm_uuid} start commanded"
-  fi
-
-  # Wait for the VM to start (max 10 minutes)
-  local end_time
-  end_time=$(($(date +%s) + (10 * 60)))
-  while true; do
-    sleep 1
-
-    if ! xe_exec cur_state vm-param-get "uuid=${vm_uuid}" param-name=power-state --minimal; then
-      logError "Failed to get power-state for VM ${vm_uuid}"
-      return 1
-    fi
-
-    if [[ "${cur_state}" == "running" ]]; then
-      logInfo "VM ${vm_uuid} running"
-      break
-    elif [[ "${cur_state}" == "halted" ]]; then
-      logError "VM ${vm_uuid} returned to halted"
-      return 1
-    elif [[ $(date +%s || true) -ge ${end_time} ]]; then
-      logError "Timeout reached while waiting for VM ${vm_uuid} to start"
-      return 1
-    fi
-  done
 
   return 0
+}
+
+# Start one or multiple VMs by their UUID
+#
+# Parameters:
+#   $@[in]: The VM UUIDs
+# Returns:
+#   0: If the VMs were all started
+#   1: If one or more VMs couldn't be started
+xe_vm_start_by_id() {
+  local __vm_start_res=0
+
+  if [[ -z "${*}" ]]; then
+    logError "Invalid VMs"
+    return 1
+  fi
+
+  local __cmd __res __vm __vm_name
+  for __vm in "${@}"; do
+    __vm_name=""
+    __cmd=("vm-list" "uuid=${__vm}" "is-control-domain=false")
+    __cmd+=("params=name-label")
+
+    # Make sure the VM exists
+    if ! xe_exec __res "${__cmd[@]}"; then
+      logError "Failed to list VM: ${__vm}"
+      return 1
+    elif [[ -z "${__res}" ]]; then
+      logError "VM ${__vm} not found"
+      return 1
+    fi
+    while IFS= read -r _line; do
+      if xe_read_param _key _value "${_line}"; then
+        if [[ "${_key}" == "name-label" ]]; then
+          if [[ -n "${__vm_name}" ]]; then
+            logError "Multiple VMs for ${__vm}"
+            return 1
+          fi
+          __vm_name="${_value}"
+        else
+          logError "Unexpected key: ${_key}"
+          return 1
+        fi
+      fi
+    done <<<"${__res}"
+
+    logTrace "Starting VM: ${__vm_name}"
+    if ! xe_exec __res vm-start "uuid=${__vm}" --minimal; then
+      logError "Failed to start VM: ${__vm_name}"
+      __vm_start_res=1
+    else
+      logInfo "Start of VM ${__vm} successful"
+    fi
+
+    # Wait for VM to be running
+    while true; do
+      if ! xe_exec cur_state vm-param-get "uuid=${vm_uuid}" param-name=power-state --minimal; then
+        logError "Failed to get power-state for VM ${__vm_name}"
+        return 1
+      fi
+      if [[ "${cur_state}" == "running" ]]; then
+        logInfo "VM ${__vm_name} running"
+        break
+      elif [[ "${cur_state}" == "halted" ]]; then
+        logError "VM ${__vm_name} returned to halted"
+        return 1
+      else
+        logInfo "VM ${__vm_name} not running yet"
+      fi
+    done
+  done
+
+  return "${__vm_start_res}"
 }
 
 # Shutdown a VM
@@ -1184,80 +1360,143 @@ xe_vm_shutdown() {
     return 1
   fi
 
-  xe_vm_shutdown_by_id "${vm_uuid}" "${__force}"
+  xe_vm_shutdown_by_id "${__force}" "${vm_uuid}"
   return $?
 }
 
-# Shutdown a VM
+# Shutdown one or multiple VMs by their UUID
 #
 # Parameters:
-#   $1[in]: The VM UUID
-#   $2[in]: If set to "force", the VM will be shutdown regardless of XCP_CRITICAL_TAG
+#   $1[in]: If set to "force", the VM will be shutdown regardless of XCP_CRITICAL_TAG
+#   $@[in]: The VM UUIDs
 # Returns:
 #   0: If the VM was shutdown
 #   1: If the VM couldn't be shutdown
 xe_vm_shutdown_by_id() {
-  local __vmsh_uuid="${1}"
-  local __vmsh_force="${2}"
+  local __vmsh_force="${1}"
+  shift
 
-  if [[ -z "${__vmsh_uuid}" ]]; then
-    logError "Invalid VM"
+  if [[ -z "${*}" ]]; then
+    logError "Invalid VMs"
     return 1
   elif [[ -z "${XCP_CRITICAL_TAG}" ]]; then
     logError "Critical tag not set. Cannot verify if we are allowed to shutdown"
     return 1
   fi
 
-  if ! xe_exec cur_state vm-param-get "uuid=${__vmsh_uuid}" param-name=power-state --minimal; then
-    logError "Failed to get power-state for VM ${__vmsh_uuid}"
-    return 1
-  fi
-
-  if [[ "${cur_state}" == "halted" ]]; then
-    logInfo "VM ${__vmsh_uuid} already halted"
-    return 0
-  elif [[ "${cur_state}" != "running" ]]; then
-    logError "VM ${__vmsh_uuid} is not running: ${cur_state}"
-    return 1
-  fi
-
-  # Unless "force", make sure the VM doesn't have tag XCP_CRITICAL_TAG
-  if [[ "${__force}" != "force" ]]; then
-    logTrace "Make sure VM ${__vmsh_uuid} is not tagged ${XCP_CRITICAL_TAG}"
-    if ! xe_vm_not_tagged "${__vmsh_uuid}" "${XCP_CRITICAL_TAG}"; then
-      logError "VM ${__vmsh_uuid} has tag ${XCP_CRITICAL_TAG}. Not allowed to shutdown"
+  # Validate each VM
+  local __res __cmd __vm _line _key _value __vm_name __vm_tags
+  for __vm in "${@}"; do
+    __cmd=("vm-list" "uuid=${__vm}" "is-control-domain=false")
+    __cmd+=("params=name-label,tags")
+    if ! xe_exec __res "${__cmd[@]}"; then
+      logError "Failed to list VM: ${__vm}"
+      return 1
+    elif [[ -z "${__res}" ]]; then
+      logError "VM ${__vm} not found"
       return 1
     fi
-  fi
+    __vm_name=""
+    while IFS= read -r _line; do
+      if xe_read_param _key _value "${_line}"; then
+        if [[ "${_key}" == "name-label" ]]; then
+          if [[ -n "${__vm_name}" ]]; then
+            logError "Multiple VMs for ${__vm}"
+            return 1
+          fi
+          __vm_name="${_value}"
+        elif [[ "${_key}" == "tags" ]]; then
+          __vm_tags=()
+          IFS=',' read -r -a __vm_tags <<<"${_value}"
+          if [[ " ${__vm_tags[*]} " =~ [[:space:]]${XCP_CRITICAL_TAG}[[:space:]] ]]; then
+            if [[ "${__vmsh_force}" != "force" ]]; then
+              logError "VM ${__vm_name} has tag ${XCP_CRITICAL_TAG}. Not allowed to shutdown"
+              return 1
+            else
+              logWarn "VM ${__vm_name} has tag ${XCP_CRITICAL_TAG}. Forced shutdown"
+            fi
+          else
+            logTrace "VM ${__vm_name} does not have tag ${XCP_CRITICAL_TAG}"
+          fi
+        fi
+      fi
+    done <<<"${__res}"
+  done
 
-  if ! xe_exec res vm-shutdown "uuid=${__vmsh_uuid}" --minimal; then
-    logError "Failed to shutdown VM ${__vmsh_uuid}: ${res}"
-    return 1
-  else
-    logInfo "VM ${__vmsh_uuid} shutdown commanded"
-  fi
+  # If we reach here, we can shut down all these VMs
+  for __vm in "${@}"; do
+    {
+      logTrace "Shutting down VM: ${__vm}"
+      if ! xe_exec __res vm-shutdown "uuid=${__vm}" --minimal; then
+        logError "Failed to shutdown VM: ${__vm}"
+      else
+        logInfo "Shutdown of VM ${__vm} successful"
+      fi
+    } &
+  done
+  logInfo "Shutdown of VMs commanded"
 
-  # Wait for the VM to shutdown (max 10 minutes)
-  local end_time
-  end_time=$(($(date +%s) + (10 * 60)))
-  while true; do
-    sleep 1
+  return 0
+}
 
-    if ! xe_exec cur_state vm-param-get "uuid=${__vmsh_uuid}" param-name=power-state --minimal; then
-      logError "Failed to get power-state for VM ${__vmsh_uuid}"
+# Wait for one or more VMs to be halted
+#
+# Parameters:
+#   $@[in]: The VM UUIDs to wait for
+# Returns:
+#   0: If all VMs were halted
+#   1: If one or more VMs couldn't be halted
+xe_vm_wait_halted_by_id() {
+  local __res __cmd __vm _line _key _value __vm_name
+  for __vm in "${@}"; do
+    __cmd=("vm-list" "uuid=${__vm}" "is-control-domain=false")
+    __cmd+=("params=name-label,power-state")
+    if ! xe_exec __res "${__cmd[@]}"; then
+      logError "Failed to list VM: ${__vm}"
+      return 1
+    elif [[ -z "${__res}" ]]; then
+      logError "VM ${__vm} not found"
       return 1
     fi
-
-    if [[ "${cur_state}" == "halted" ]]; then
-      logInfo "VM ${__vmsh_uuid} halted"
-      break
-    elif [[ "${cur_state}" == "running" ]]; then
-      logError "VM ${__vmsh_uuid} still running"
-      return 1
-    elif [[ $(date +%s || true) -ge ${end_time} ]]; then
-      logError "Timeout reached while waiting for VM ${__vmsh_uuid} to shutdown"
-      return 1
-    fi
+    __vm_name=""
+    while IFS= read -r _line; do
+      if xe_read_param _key _value "${_line}"; then
+        if [[ "${_key}" == "name-label" ]]; then
+          if [[ -n "${__vm_name}" ]]; then
+            logError "Multiple VMs for ${__vm}"
+            return 1
+          fi
+          __vm_name="${_value}"
+        elif [[ "${_key}" == "power-state" ]]; then
+          if [[ "${_value}" == "halted" ]]; then
+            logInfo "VM ${__vm_name} is halted"
+            break
+          elif [[ "${_value}" == "shutting-down" ]]; then
+            logTrace "VM ${__vm_name} is still shutting down"
+            while true; do
+              sleep 1
+              if ! xe_exec _value vm-param-get "uuid=${__vm}" param-name=power-state --minimal; then
+                logError "Failed to get power-state for VM ${__vm}"
+                return 1
+              elif [[ "${_value}" == "halted" ]]; then
+                logInfo "VM ${__vm_name} is finally halted"
+                break
+              elif [[ "${_value}" == "shutting-down" ]]; then
+                logTrace "VM ${__vm_name} is still shutting down"
+              else
+                logError "Unexpected state ${_value} for VM ${__vm_name}"
+                return 1
+              fi
+            done
+          else
+            logError "Unexpected state: ${_value} for VM ${__vm_name}"
+            return 1
+          fi
+        else
+          logWarn "Unknown key ${_key} for VM ${__vm_name}"
+        fi
+      fi
+    done <<<"${__res}"
   done
 
   return 0
