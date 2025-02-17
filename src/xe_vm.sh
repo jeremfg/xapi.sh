@@ -1490,7 +1490,7 @@ xe_vm_wait_halted_by_id() {
           if [[ "${_value}" == "halted" ]]; then
             logInfo "VM ${__vm_name} is halted"
             break
-          elif [[ "${_value}" == "shutting-down" ]]; then
+          elif [[ "${_value}" == "shutting-down" ]] || [[ "${_value}" == "running" ]]; then
             logTrace "VM ${__vm_name} is still shutting down"
             while true; do
               sleep 1
