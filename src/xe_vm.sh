@@ -1460,13 +1460,20 @@ xe_vm_shutdown_by_id() {
 # Wait for one or more VMs to be halted
 #
 # Parameters:
+#   $1[in]: Number of seconds before giving up
 #   $@[in]: The VM UUIDs to wait for
 # Returns:
 #   0: If all VMs were halted
 #   1: If one or more VMs couldn't be halted
 xe_vm_wait_halted_by_id() {
+  local __timeout="${1}"
+  shift
+
+  # Calulate timeout now
+  local __end_by
+  __end_by=$(($(date +%s) + __timeout))
+
   local __res __cmd __vm _line _key _value __vm_name __started_wait
-  __started_wait=$(date +%s)
   for __vm in "${@}"; do
     __cmd=("vm-list" "uuid=${__vm}" "is-control-domain=false")
     __cmd+=("params=name-label,power-state")
@@ -1490,7 +1497,8 @@ xe_vm_wait_halted_by_id() {
           if [[ "${_value}" == "halted" ]]; then
             logInfo "VM ${__vm_name} is halted"
             break
-          elif [[ "${_value}" == "shutting-down" ]] || [[ "${_value}" == "running" ]]; then
+          elif [[ "${_value}" == "running" ]] ||
+            [[ "${_value}" == "paused" ]]; then
             logTrace "VM ${__vm_name} is still shutting down"
             while true; do
               sleep 1
@@ -1500,20 +1508,17 @@ xe_vm_wait_halted_by_id() {
               elif [[ "${_value}" == "halted" ]]; then
                 logInfo "VM ${__vm_name} is finally halted"
                 break
-              elif [[ "${_value}" == "shutting-down" ]]; then
-                logTrace "VM ${__vm_name} is still shutting down"
               elif [[ "${_value}" == "running" ]]; then
-                local elapsed
-                elapsed=$(($(date +%s) - __started_wait))
-                if [[ ${elapsed} -gt 15 ]]; then
-                  logError "VM ${__vm_name} was stucked in the running state for more than 15 seconds"
+                if [[ $(date +%s || true) -gt ${__end_by} ]]; then
+                  logError "VM ${__vm_name} was stucked in the running state \
+                    for more than ${__timeout} seconds"
                   return 1
                 else
-                  logWarn "VM ${__vm_name} is still running after ${elapsed} seconds"
+                  logWarn "VM ${__vm_name} is still running after \
+                    $((__timeout - (__end_by - $(date +%s || true)))) seconds"
                 fi
               else
                 logError "Unexpected state ${_value} for VM ${__vm_name}"
-                return 1
               fi
             done
           else
