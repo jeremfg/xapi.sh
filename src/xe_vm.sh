@@ -57,7 +57,7 @@ xe_vm_list_tagged() {
     fi
   fi
 
-  if ! xe_exec __res "${cmd[@]}"; then
+  if ! xe_exec __res "${__cmd[@]}"; then
     logError "Failed to list VMs"
     return 1
   fi
@@ -142,7 +142,7 @@ xe_vm_list_not_tagged() {
     fi
   fi
 
-  if ! xe_exec __res "${cmd[@]}"; then
+  if ! xe_exec __res "${__cmd[@]}"; then
     logError "Failed to list VMs"
     return 1
   fi
