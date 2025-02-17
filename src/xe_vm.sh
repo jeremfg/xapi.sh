@@ -1508,7 +1508,8 @@ xe_vm_wait_halted_by_id() {
               elif [[ "${_value}" == "halted" ]]; then
                 logInfo "VM ${__vm_name} is finally halted"
                 break
-              elif [[ "${_value}" == "running" ]]; then
+              elif [[ "${_value}" == "running" ]] ||
+                [[ "${_value}" == "paused" ]]; then
                 if [[ $(date +%s || true) -gt ${__end_by} ]]; then
                   logError "VM ${__vm_name} was stucked in the running state \
                     for more than ${__timeout} seconds"
