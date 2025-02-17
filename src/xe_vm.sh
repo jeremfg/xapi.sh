@@ -1506,10 +1506,10 @@ xe_vm_wait_halted_by_id() {
                 local elapsed
                 elapsed=$(($(date +%s) - __started_wait))
                 if [[ ${elapsed} -gt 15 ]]; then
-                  logWarn "VM ${__vm_name} is still running after ${elapsed} seconds"
-                else
                   logError "VM ${__vm_name} was stucked in the running state for more than 15 seconds"
                   return 1
+                else
+                  logWarn "VM ${__vm_name} is still running after ${elapsed} seconds"
                 fi
               else
                 logError "Unexpected state ${_value} for VM ${__vm_name}"
