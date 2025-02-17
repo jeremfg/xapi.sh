@@ -1465,7 +1465,8 @@ xe_vm_shutdown_by_id() {
 #   0: If all VMs were halted
 #   1: If one or more VMs couldn't be halted
 xe_vm_wait_halted_by_id() {
-  local __res __cmd __vm _line _key _value __vm_name
+  local __res __cmd __vm _line _key _value __vm_name __started_wait
+  __started_wait=$(date +%s)
   for __vm in "${@}"; do
     __cmd=("vm-list" "uuid=${__vm}" "is-control-domain=false")
     __cmd+=("params=name-label,power-state")
@@ -1501,6 +1502,15 @@ xe_vm_wait_halted_by_id() {
                 break
               elif [[ "${_value}" == "shutting-down" ]]; then
                 logTrace "VM ${__vm_name} is still shutting down"
+              elif [[ "${_value}" == "running" ]]; then
+                local elapsed
+                elapsed=$(($(date +%s) - __started_wait))
+                if [[ ${elapsed} -gt 15 ]]; then
+                  logWarn "VM ${__vm_name} is still running after ${elapsed} seconds"
+                else
+                  logError "VM ${__vm_name} was stucked in the running state for more than 15 seconds"
+                  return 1
+                fi
               else
                 logError "Unexpected state ${_value} for VM ${__vm_name}"
                 return 1
