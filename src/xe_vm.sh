@@ -1421,8 +1421,18 @@ xe_vm_shutdown_by_id() {
           IFS=',' read -r -a __vm_tags <<<"${_value}"
           if [[ " ${__vm_tags[*]} " =~ [[:space:]]${XCP_CRITICAL_TAG}[[:space:]] ]]; then
             if [[ "${__vmsh_force}" != "force" ]]; then
-              logError "VM ${__vm_name} has tag ${XCP_CRITICAL_TAG}. Not allowed to shutdown"
-              return 1
+              # Ignore if VM is already halted
+              local state
+              if ! xe_vm_state_by_id state "${__vm}"; then
+                logError "Failed to get state for VM ${__vm_name}"
+                logError "VM ${__vm_name} has tag ${XCP_CRITICAL_TAG}. Not allowed to shutdown"
+                return 1
+              elif [[ "${state}" != "halted" ]]; then
+                logError "VM ${__vm_name} has tag ${XCP_CRITICAL_TAG}. Not allowed to shutdown"
+                return 1
+              else
+                logInfo "VM ${__vm_name} already halted. Ignoring the fact we're not allowed"
+              fi
             else
               logWarn "VM ${__vm_name} has tag ${XCP_CRITICAL_TAG}. Forced shutdown"
             fi
