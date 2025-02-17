@@ -36,7 +36,7 @@ xe_vm_list_tagged() {
   local __cmd __res
   __cmd=("vm-list" "is-control-domain=false" "params=uuid,name-label,tags")
   if [[ "${__scope}" == "local" ]]; then
-    if ! xe_current_host __res; then
+    if ! xe_host_current __res; then
       logError "Failed to get current host"
       return 1
     else
@@ -121,7 +121,7 @@ xe_vm_list_not_tagged() {
   local __cmd __res
   __cmd=("vm-list" "is-control-domain=false" "params=uuid,name-label,tags")
   if [[ "${__scope}" == "local" ]]; then
-    if ! xe_current_host __res; then
+    if ! xe_host_current __res; then
       logError "Failed to get current host"
       return 1
     else
@@ -1627,17 +1627,11 @@ fi
 if ! source "${PREFIX}/lib/slf4.sh"; then
   echo "ERROR: Failed to load slf4.sh"
   exit 1
-fi
-# shellcheck source=src/xe_host.sh
-if ! source "${XV_ROOT}/src/xe_host.sh"; then
+elif ! source "${XV_ROOT}/src/xe_host.sh"; then
   logFatal "Failed to load xe_host.sh"
-fi
-# shellcheck source=src/xe_storage.sh
-if ! source "${XV_ROOT}/src/xe_storage.sh"; then
+elif ! source "${XV_ROOT}/src/xe_storage.sh"; then
   logFatal "Failed to load xe_storage.sh"
-fi
-# shellcheck source=src/xe_storage.sh
-if ! source "${XV_ROOT}/src/xe_network.sh"; then
+elif ! source "${XV_ROOT}/src/xe_network.sh"; then
   logFatal "Failed to load xe_network.sh"
 fi
 
