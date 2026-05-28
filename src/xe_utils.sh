@@ -184,7 +184,7 @@ xe_ssh_exec() {
   # Since we have XE_LOGIN, we can assume we have the credentials for SSH as well
   local __actual_cmd __printable_cmd __result __return_code
   __actual_cmd=("sshpass" "-p" "${XE_BACKUP_PWD}")
-  __actual_cmd+=("ssh" "-o" "StrictHostKeyChecking=no" -o "PQWarning=no")
+  __actual_cmd+=("ssh" "-o" "StrictHostKeyChecking=no")
   __actual_cmd+=("${XE_BACKUP_USR}@${XE_BACKUP_HOST}")
   __actual_cmd+=("$@")
 
@@ -195,6 +195,8 @@ xe_ssh_exec() {
   logTrace "Executing remote command: ${__printable_cmd[*]}"
   __result=$("${__actual_cmd[@]}" 2>&1)
   __return_code=$?
+  # Filter post-quantum warning from output
+  __result=$(echo "${__result}" | grep -v -e "post-quantum key exchange algorithm" -e "store now, decrypt later" -e "https://openssh.com/pq.html")
 
   if [[ ${__return_code} -ne 0 ]]; then
     logError <<EOF
