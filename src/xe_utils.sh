@@ -184,7 +184,7 @@ xe_ssh_exec() {
   # Since we have XE_LOGIN, we can assume we have the credentials for SSH as well
   local __actual_cmd __printable_cmd __result __return_code
   __actual_cmd=("sshpass" "-p" "${XE_BACKUP_PWD}")
-  __actual_cmd+=("ssh" "-o" "StrictHostKeyChecking=no")
+  __actual_cmd+=("ssh" "-o" "StrictHostKeyChecking=no" -o "PQWarning=no")
   __actual_cmd+=("${XE_BACKUP_USR}@${XE_BACKUP_HOST}")
   __actual_cmd+=("$@")
 
